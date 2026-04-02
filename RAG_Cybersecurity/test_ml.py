@@ -1,11 +1,11 @@
 """
-Test completo per Dataset: verifica sia su training che su test.
+Test completo per Dataset: verifica caricamento, MI, ordinamento, split e serializzazione.
 """
 
 import os
 import pandas as pd
 from src.dataset import Dataset
-
+from src.text_dataset import TextDataset
 
 def test_su_file(file_path, nome_file):
     print(f"--- Test su {nome_file} ---")
@@ -40,20 +40,28 @@ def test_su_file(file_path, nome_file):
     print(f"Distribuzione train: {dict(train_dist)}")
     print(f"Distribuzione test:  {dict(test_dist)}")
 
-    # Conversione in testo
-    testo = dataset_sorted.row_to_text(0)
-    print(f"Esempio riga 0 (lunghezza): {len(testo)} caratteri")
-    print("Prime 200 caratteri:\n", testo[:200])
+    # Verifica la serializzazione e la conversione in testo
+    train.save('temp_train.pkl')
+    test.save('temp_test.pkl')
 
+    # Carica come TextDataset per verificare la conversione
+    train_text = TextDataset('temp_train.pkl')
+    test_text = TextDataset('temp_test.pkl')
+
+    # Mostra un esempio di testo
+    print("Esempio di testo (prima riga del training set):")
+    print(train_text.texts[0][:200])  # primi 200 caratteri
+
+    # Rimuovi file temporanei
     os.remove(sample_file)
+    os.remove('temp_train.pkl')
+    os.remove('temp_test.pkl')
     print("✅ Test completato con successo!\n")
-
 
 def main():
     print("=== Test Dataset ===\n")
     test_su_file('DatasetPE/BODMAS_features_named.csv', 'training (BODMAS_features_named)')
     test_su_file('DatasetPE/test_named.csv', 'test (test_named)')
-
 
 if __name__ == "__main__":
     main()

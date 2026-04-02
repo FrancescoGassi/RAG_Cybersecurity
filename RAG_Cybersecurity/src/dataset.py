@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import pickle
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Dict
@@ -53,7 +54,8 @@ class Dataset:
         """
         if self.feat_data is None:
             raise ValueError("Dataset non caricato.")
-        mi = mutual_info_classif(self.feat_data, self.target_data, random_state=42)
+        mi = mutual_info_classif(self.feat_data, self.target_data,
+                                 random_state=42, n_jobs=-1)
         mi_dict = dict(zip(self.feature_names, mi))
         return dict(sorted(mi_dict.items(), key=lambda x: x[1], reverse=True))
 
@@ -86,23 +88,24 @@ class Dataset:
 
         train_ds = Dataset.__new__(Dataset)
         train_ds.target_name = self.target_name
-        train_ds.feature_names = self.feature_names.copy()
-        train_ds.feat_data = X_train.copy()
-        train_ds.target_data = y_train.copy()
+        train_ds.feature_names = self.feature_names
+        train_ds.feat_data = X_train
+        train_ds.target_data = y_train
 
         test_ds = Dataset.__new__(Dataset)
         test_ds.target_name = self.target_name
-        test_ds.feature_names = self.feature_names.copy()
-        test_ds.feat_data = X_test.copy()
-        test_ds.target_data = y_test.copy()
+        test_ds.feature_names = self.feature_names
+        test_ds.feat_data = X_test
+        test_ds.target_data = y_test
 
         logger.info(f"Split completato: train={len(train_ds)}, test={len(test_ds)}")
         return train_ds, test_ds
 
-    def row_to_text(self, row_index: int, separator: str = ": ") -> str:
+    def _row_to_text(self, row_index: int, separator: str = ": ") -> str:
         """
         Trasforma una riga in testo "feature: valore" per l'uso in un sistema RAG/LLM.
         I valori float sono arrotondati a 6 decimali.
+        Questo metodo è privato (con underscore).
         """
         if row_index < 0 or row_index >= len(self.feat_data):
             raise ValueError(f"Indice {row_index} non valido.")
@@ -113,6 +116,26 @@ class Dataset:
             value_str = f"{value:.6f}" if isinstance(value, float) else str(value)
             parts.append(f"{feat}{separator}{value_str}")
         return ", ".join(parts)
+
+    def save(self, path: str):
+        """
+        Serializza il dataset in formato testuale (lista di stringhe e target).
+        Il file salvato conterrà una tupla (list_of_texts, target_series).
+        """
+        texts = [self._row_to_text(i) for i in range(len(self))]
+        with open(path, 'wb') as f:
+            pickle.dump((texts, self.target_data), f)
+        logger.info(f"Dataset salvato in formato testuale in {path}")
+
+    def text_to_dataset(self) -> 'TextDataset':
+        """
+        Converte il dataset corrente in un oggetto TextDataset,
+        senza passare attraverso la serializzazione su disco.
+        Restituisce un'istanza di TextDataset.
+        """
+        from text_dataset import TextDataset
+        texts = [self._row_to_text(i) for i in range(len(self))]
+        return TextDataset.from_data(texts, self.target_data)
 
     def __len__(self) -> int:
         return len(self.feat_data) if self.feat_data is not None else 0
