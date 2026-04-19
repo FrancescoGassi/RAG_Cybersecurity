@@ -2,7 +2,20 @@
 Test completo per Dataset: verifica caricamento, MI, ordinamento, split e serializzazione.
 """
 
+import sys
 import os
+import logging
+
+# Soppressione log e warning
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("dataset").setLevel(logging.WARNING)
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
 import pandas as pd
 from src.dataset import Dataset
 from src.text_dataset import TextDataset
@@ -34,11 +47,11 @@ def test_su_file(file_path, nome_file):
     train, test = dataset_sorted.train_test_split(test_size=0.2, random_state=42)
     print(f"Split: train={len(train)}, test={len(test)}")
 
-    # Distribuzione classi
+    # Distribuzione classi (formattata senza np.float64)
     train_dist = train.target_data.value_counts(normalize=True)
     test_dist = test.target_data.value_counts(normalize=True)
-    print(f"Distribuzione train: {dict(train_dist)}")
-    print(f"Distribuzione test:  {dict(test_dist)}")
+    print(f"Distribuzione train: { {k: float(v) for k, v in train_dist.items()} }")
+    print(f"Distribuzione test:  { {k: float(v) for k, v in test_dist.items()} }")
 
     # Verifica la serializzazione e la conversione in testo
     train.save('temp_train.pkl')
@@ -50,7 +63,7 @@ def test_su_file(file_path, nome_file):
 
     # Mostra un esempio di testo
     print("Esempio di testo (prima riga del training set):")
-    print(train_text.texts[0][:200])  # primi 200 caratteri
+    print(train_text.get_texts()[0][:200])  # primi 200 caratteri
 
     # Rimuovi file temporanei
     os.remove(sample_file)
