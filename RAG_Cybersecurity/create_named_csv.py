@@ -17,7 +17,7 @@ for input_path, output_path in input_files:
         old_header = next(reader)
         n_features = len(old_header) - 1
         if n_features != len(feature_names):
-            print(f"Attenzione: numero di feature nel file ({n_features}) diverso da {len(feature_names)}. Uso i primi {n_features} nomi.")
+            print(f"   Attenzione: feature nel file ({n_features}) != {len(feature_names)}. Uso i primi {n_features} nomi.")
             feature_names_to_use = feature_names[:n_features]
         else:
             feature_names_to_use = feature_names
@@ -25,5 +25,5 @@ for input_path, output_path in input_files:
         writer.writerow(new_header)
         for row in reader:
             writer.writerow(row)
-    print(f"Creato {output_path}\n")
+    print(f"   Creato {output_path}\n")
 print("Operazione completata.")
