@@ -3,19 +3,17 @@ import numpy as np
 from typing import List
 
 class Embedding:
-    """
-    Gestisce il caricamento del modello di embedding e la conversione di testi in vettori.
-    Il modello è condiviso come attributo di classe per non ricaricarlo ogni volta.
-    """
-
     def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
         self._model = self.load_model(model_name)
 
     @classmethod
     def load_model(cls, model_name: str = 'all-MiniLM-L6-v2'):
-        return SentenceTransformer(model_name)
+        # Sopprimi output di SentenceTransformer
+        import logging
+        logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+        return SentenceTransformer(model_name, device="cpu")
 
     def encode(self, sentences: List[str]) -> np.ndarray:
         if isinstance(sentences, str):
             sentences = [sentences]
-        return self._model.encode(sentences, convert_to_numpy=True)
+        return self._model.encode(sentences, convert_to_numpy=True, show_progress_bar=False)

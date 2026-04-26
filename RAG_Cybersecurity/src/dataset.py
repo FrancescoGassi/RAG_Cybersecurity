@@ -6,35 +6,21 @@ from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Dict
 import logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.getLogger(__name__).setLevel(logging.ERROR)
 
 class Dataset:
-    """
-    Modella un dataset di file Windows PE (feature + target).
-    Attributi:
-        feat_data (pd.DataFrame): DataFrame con le 2381 colonne feature.
-        target_data (pd.Series): Series con la colonna target (label 0/1).
-        feature_names (List[str]): nomi simbolici delle feature, in ordine.
-        target_name (str): nome dell'ultima colonna del CSV (target).
-    """
-
     def __init__(self, file_path: str):
         self.feat_data = None
         self.target_data = None
         self.feature_names = None
         self.target_name = None
 
-        try:
-            df = pd.read_csv(file_path)
-            self.target_name = df.columns[-1]
-            self.target_data = df[self.target_name].copy()
-            self.feat_data = df.drop(columns=[self.target_name])
-            self.feature_names = list(self.feat_data.columns)
-            logger.info(f"Dataset caricato: {len(self.feat_data)} esempi, {len(self.feature_names)} feature")
-        except Exception as e:
-            logger.error(f"Errore caricamento {file_path}: {e}")
-            raise
+        df = pd.read_csv(file_path)
+        self.target_name = df.columns[-1]
+        self.target_data = df[self.target_name].copy()
+        self.feat_data = df.drop(columns=[self.target_name])
+        self.feature_names = list(self.feat_data.columns)
+        # Nessun print, solo inizializzazione
 
     def compute_mutual_information(self) -> Dict[str, float]:
         if self.feat_data is None:
@@ -69,7 +55,6 @@ class Dataset:
         test_ds.feature_names = self.feature_names
         test_ds.feat_data = X_test
         test_ds.target_data = y_test
-        logger.info(f"Split completato: train={len(train_ds)}, test={len(test_ds)}")
         return train_ds, test_ds
 
     def _row_to_text(self, row_index: int, separator: str = ": ") -> str:
@@ -79,7 +64,15 @@ class Dataset:
         parts = []
         for feat in self.feature_names:
             value = row[feat]
-            value_str = f"{value:.6f}" if isinstance(value, float) else str(value)
+            if isinstance(value, float):
+                if value == int(value):
+                    value_str = str(int(value))
+                else:
+                    value_str = f"{value:.2f}"
+            elif isinstance(value, (int, np.integer)):
+                value_str = str(int(value))
+            else:
+                value_str = str(value)
             parts.append(f"{feat}{separator}{value_str}")
         return ", ".join(parts)
 
@@ -87,7 +80,6 @@ class Dataset:
         texts = [self._row_to_text(i) for i in range(len(self))]
         with open(path, 'wb') as f:
             pickle.dump((texts, self.target_data), f)
-        logger.info(f"Dataset salvato in formato testuale in {path}")
 
     def text_to_dataset(self) -> 'TextDataset':
         from text_dataset import TextDataset
