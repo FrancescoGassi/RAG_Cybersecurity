@@ -4,7 +4,7 @@ scikit-learn>=1.5.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 pytest
-faiss-gpu
+faiss-cpu
 sentence-transformers
 ollama
 tiktoken
