@@ -69,7 +69,7 @@ class LLMPredictor:
         Restituisce (prompt_string, lista_tokens_per_vicino, total_tokens_prompt)
         """
         n_examples = len(retrieved_texts)
-        tokens_per_example = max(30, (self.max_tokens - 200) // (n_examples + 1))
+        tokens_per_example = max(30, (self.max_tokens - 200) // max(1, n_examples))
         
         neighbor_tokens_list = []
         
@@ -99,7 +99,7 @@ class LLMPredictor:
             )
             messages.append({"role": "user", "content": user_content})
             prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        else:   # model_type == "causal"
+        else:
             prompt = system_prompt
             for i, (text, label) in enumerate(zip(retrieved_texts, retrieved_labels)):
                 truncated_text = self.truncate_text(text, tokens_per_example)
@@ -129,6 +129,8 @@ class LLMPredictor:
             q_emb = embedding_model.encode([query])[0]
             _, indices = vector_index.search(q_emb, k=k)
             ret_texts, ret_targets = vector_index.get_metadata_by_indices(indices)
+
+            ret_acc = sum(1 for t in ret_targets if t == true_label) / len(ret_targets)
 
             prompt, neighbor_tokens, total_tokens = self.buildPrompt(ret_texts, ret_targets, query)
             
@@ -168,6 +170,7 @@ class LLMPredictor:
                 'prediction': pred,
                 'true_label': true_label,
                 'retrieved_labels': str(ret_targets),
+                'retrieval_accuracy': ret_acc,
                 'pred_type': pred_type,
                 'total_prompt_tokens': total_tokens,
                 'neighbor_tokens': str(neighbor_tokens),
