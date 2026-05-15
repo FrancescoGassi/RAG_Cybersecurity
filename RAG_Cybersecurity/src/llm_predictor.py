@@ -32,7 +32,7 @@ class LLMPredictor:
 
         print(f"   Caricamento {model_name} su {self.device} (tipo forzato: {self.model_type})...")
         
-        # Configurazione quantizzazione solo per modelli chat (es. Qwen) se richiesta
+        # Configurazione quantizzazione solo per modelli chat se richiesta
         quant_config = None
         if self.model_type == "chat" and self.qwen_use_4bit and self.device == "cuda":
             quant_config = BitsAndBytesConfig(
@@ -44,6 +44,9 @@ class LLMPredictor:
             print("   → Utilizzo caricamento in 4-bit")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.tokenizer.truncation_side = "right"
+        # ==========================================================
+        
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
@@ -69,7 +72,7 @@ class LLMPredictor:
         Restituisce (prompt_string, lista_tokens_per_vicino, total_tokens_prompt)
         """
         n_examples = len(retrieved_texts)
-        tokens_per_example = max(30, (self.max_tokens - 200) // max(1, n_examples))
+        tokens_per_example = max(30, (self.max_tokens) // max(1, n_examples))
         
         neighbor_tokens_list = []
         
