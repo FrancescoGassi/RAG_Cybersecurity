@@ -3,10 +3,10 @@ numpy>=1.26.0
 scikit-learn>=1.5.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
-pytest
 faiss-cpu
 sentence-transformers
-ollama
-tiktoken
-python-dotenv
+torch>=2.0.0
+transformers>=4.40.0
+accelerate
+bitsandbytes
 tqdm

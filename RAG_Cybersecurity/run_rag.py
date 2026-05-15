@@ -7,16 +7,21 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 from src.config import MAX_TOKENS, K_NEIGHBORS, SAMPLE_SIZE
 
-USE_QWEN = False   # False = DistilGPT2, True = Qwen/Qwen3-4B-Instruct-2507
+# ===================== SELEZIONE MODELLO =====================
+# Scegli quale Qwen usare: "small" (Qwen2-0.5B-Instruct) o "large" (Qwen3-4B-Instruct)
+QWEN_MODEL = "small"
 
-if USE_QWEN:
+if QWEN_MODEL == "small":
+    LLM_MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
+    QWEN_USE_4BIT = False   # 0.5B non necessita di quantizzazione
+elif QWEN_MODEL == "large":
     LLM_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
-    MODEL_TYPE = "chat"
-    QWEN_USE_4BIT = True   # Se hai poca VRAM, lascia True; se hai tanta VRAM, metti False
+    QWEN_USE_4BIT = True    # Il modello 4B beneficia della quantizzazione 4-bit
 else:
-    LLM_MODEL_NAME = "DistilGPT2"
-    MODEL_TYPE = "causal"
-    QWEN_USE_4BIT = False
+    raise ValueError("QWEN_MODEL deve essere 'small' o 'large'")
+
+MODEL_TYPE = "chat"
+# ============================================================
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -39,7 +44,7 @@ def print_step(step_text):
     print(f"\n{step_text}...")
 
 def main():
-    print(f"=== RAG (con LLM) ===")
+    print(f"=== RAG con LLM ({QWEN_MODEL}) ===")
 
     # 1. Caricamento dataset
     print_step("1. Caricamento training e test")
@@ -65,15 +70,15 @@ def main():
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature (dal training): {', '.join(top5)}")
 
-    # 3. Ordinamento feature
+    # 3. Ordinamento feature per MI
     print_step("3. Ordinamento feature secondo MI")
     train_sorted = train_ds.sort_features_by_mi(mi)
     test_sorted  = test_ds.sort_features_by_mi(mi)
     print(f"   Training ordinato: {len(train_sorted)} esempi")
     print(f"   Test ordinato:     {len(test_sorted)} esempi")
 
-    # 4. Conversione in testo (usa cache separata per evitare conflitti tra modelli)
-    model_suffix = "_qwen" if USE_QWEN else "_distilgpt2"
+    # 4. Conversione in testo (cache separata per modello)
+    model_suffix = f"_qwen_{QWEN_MODEL}"
     train_pkl = os.path.join(CACHE_DIR, f'train_texts{model_suffix}.pkl')
     test_pkl = os.path.join(CACHE_DIR, f'test_texts{model_suffix}.pkl')
     if not os.path.exists(train_pkl):
@@ -121,8 +126,7 @@ def main():
     acc = (y_true == y_pred).mean()
 
     print("\n" + "=" * 60)
-    model_name_short = "Qwen3-4B" if USE_QWEN else "DistilGPT2"
-    title = f"RAG con {model_name_short} – RISULTATI"
+    title = f"RAG con LLM {QWEN_MODEL} – RISULTATI"
     print(" " * ((60 - len(title)) // 2) + title)
     print("=" * 60)
     print(f"\nACCURATEZZA: {acc*100:.2f}%")
