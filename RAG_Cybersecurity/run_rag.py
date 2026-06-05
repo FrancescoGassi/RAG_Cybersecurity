@@ -1,27 +1,27 @@
+"""
+ESPERIMENTO 2: RAG con LLM
+- CSV output: rag_predictions.csv (nome fisso)
+- Cache: train_texts.pkl, test_texts.pkl, faiss_index (condivisi con MV)
+- Usa solo le prime 100 feature per Mutual Information
+"""
+
 import sys
 import os
 import logging
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
 
-from src.config import MAX_TOKENS, K_NEIGHBORS, SAMPLE_SIZE
+from src.config import (
+    MAX_TOKENS, K_NEIGHBORS, MODEL_TYPE,
+    DEBUG_LLM, SAMPLE_SIZE, TEST_LIMIT,
+    LLM_MODEL_NAME, QWEN_USE_4BIT
+)
 
-# ===================== SELEZIONE MODELLO =====================
-# Scegli quale Qwen usare: "small" (Qwen2-0.5B-Instruct) o "large" (Qwen3-4B-Instruct)
-QWEN_MODEL = "small"
-
-if QWEN_MODEL == "small":
-    LLM_MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
-    QWEN_USE_4BIT = False   # 0.5B non necessita di quantizzazione
-elif QWEN_MODEL == "large":
-    LLM_MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
-    QWEN_USE_4BIT = True    # Il modello 4B beneficia della quantizzazione 4-bit
-else:
-    raise ValueError("QWEN_MODEL deve essere 'small' o 'large'")
-
-MODEL_TYPE = "chat"
-# ============================================================
+# Forza l'uso di un numero ridotto di feature (le più informative)
+TOP_FEATURES = 100
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -43,15 +43,30 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 def print_step(step_text):
     print(f"\n{step_text}...")
 
-def main():
-    print(f"=== RAG con LLM ({QWEN_MODEL}) ===")
+def print_experiment_params():
+    print("\n" + "=" * 70)
+    print(" PARAMETRI ESPERIMENTO - RAG con LLM ".center(70))
+    print("=" * 70)
+    print(f"  Modello LLM            : {LLM_MODEL_NAME}")
+    print(f"  Quantizzazione 4-bit   : {QWEN_USE_4BIT}")
+    print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
+    print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
+    print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
+    print(f"  Token massimi prompt   : {MAX_TOKENS}")
+    print(f"  Debug LLM              : {DEBUG_LLM}")
+    print(f"  Top feature selezionate: {TOP_FEATURES}")
+    print("=" * 70)
 
-    # 1. Caricamento dataset
-    print_step("1. Caricamento training e test")
+def main():
+    print_experiment_params()
+    print("\n=== RAG con LLM (con fallback a Majority Voting) ===")
+
+    # 1. Caricamento dati
+    print_step("1. Caricamento dataset")
     train_ds = Dataset('DatasetPE/BODMAS_features_named.csv')
     test_ds  = Dataset('DatasetPE/test_named.csv')
-    print(f"   Training: {len(train_ds)} esempi, {len(train_ds.feature_names)} feature")
-    print(f"   Test:     {len(test_ds)} esempi, {len(test_ds.feature_names)} feature")
+    print(f"   Training originale: {len(train_ds)} esempi, {len(train_ds.feature_names)} feature")
+    print(f"   Test originale:     {len(test_ds)} esempi, {len(test_ds.feature_names)} feature")
 
     if SAMPLE_SIZE and len(train_ds) > SAMPLE_SIZE:
         df_temp = train_ds.feat_data.copy()
@@ -59,43 +74,55 @@ def main():
         df_sample = df_temp.sample(n=SAMPLE_SIZE, random_state=42)
         train_ds.feat_data = df_sample.drop('__target__', axis=1)
         train_ds.target_data = df_sample['__target__']
-        print(f"   → Usato sottocampione del training: {SAMPLE_SIZE} esempi")
-    else:
-        print(f"   → Usato training completo ({len(train_ds)} esempi)")
+        print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
 
     # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
-    with tqdm(total=1, desc="   Calcolo MI", bar_format="{l_bar}{bar}"):
-        mi = train_ds.compute_mutual_information()
+    print("   Calcolo MI in corso...", end=' ', flush=True)
+    mi = train_ds.compute_mutual_information()
+    print("completato.")
     top5 = list(mi.keys())[:5]
-    print(f"   Top-5 feature (dal training): {', '.join(top5)}")
+    print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature per MI
-    print_step("3. Ordinamento feature secondo MI")
-    train_sorted = train_ds.sort_features_by_mi(mi)
-    test_sorted  = test_ds.sort_features_by_mi(mi)
-    print(f"   Training ordinato: {len(train_sorted)} esempi")
-    print(f"   Test ordinato:     {len(test_sorted)} esempi")
+    # 3. Ordinamento feature e selezione top-k
+    print_step(f"3. Selezione delle prime {TOP_FEATURES} feature per MI")
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=TOP_FEATURES)
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=TOP_FEATURES)
+    print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
+    print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
-    # 4. Conversione in testo (cache separata per modello)
-    model_suffix = f"_qwen_{QWEN_MODEL}"
-    train_pkl = os.path.join(CACHE_DIR, f'train_texts{model_suffix}.pkl')
-    test_pkl = os.path.join(CACHE_DIR, f'test_texts{model_suffix}.pkl')
+    # 4. Conversione in testo - cache (separata per il numero di feature, ma usiamo nomi fissi per semplicità)
+    train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
+    test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
         train_sorted.save(train_pkl)
     if not os.path.exists(test_pkl):
         test_sorted.save(test_pkl)
     train_text = TextDataset(train_pkl)
     test_text = TextDataset(test_pkl)
-    print("   Testi salvati/ricaricati (in cache/)")
+    print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Embedding + FAISS
-    print_step("5. Generazione embedding e indice FAISS (L2)")
+    # 5. Limitazione test set bilanciata
+    if TEST_LIMIT is not None:
+        targets = test_text.get_targets().tolist()
+        indices = np.arange(len(targets))
+        if len(np.unique(targets)) == 2 and min(pd.Series(targets).value_counts()) >= TEST_LIMIT // 2:
+            _, sampled_idx = train_test_split(indices, test_size=TEST_LIMIT, stratify=targets, random_state=42)
+        else:
+            sampled_idx = indices[:TEST_LIMIT]
+        test_texts = [test_text.get_texts()[i] for i in sampled_idx]
+        true_labels_num = [targets[i] for i in sampled_idx]
+        print(f"   → Test limitato a {len(test_texts)} campioni (bilanciati: {pd.Series(true_labels_num).value_counts().to_dict()})")
+    else:
+        test_texts = test_text.get_texts()
+        true_labels_num = test_text.get_targets().tolist()
+        print(f"   → Test completo ({len(test_texts)} campioni)")
+
+    # 6. Embedding e indice FAISS
+    print_step("4. Generazione embedding e indice FAISS (L2)")
     emb_model = Embedding()
-    print("   Creazione embedding del training set...")
     train_emb = train_text.text_to_emb(emb_model)
-
-    index_prefix = os.path.join(CACHE_DIR, f"faiss_index{model_suffix}")
+    index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
         index = VectorIndex()
         index.build(train_emb, texts=train_text.get_texts(), metric="L2")
@@ -104,47 +131,40 @@ def main():
     index_loaded.load(index_prefix)
     print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
 
-    # 6. LLM
-    print_step(f"6. Caricamento modello LLM: {LLM_MODEL_NAME}")
-    llm = LLMPredictor(max_tokens=MAX_TOKENS, model_type=MODEL_TYPE)
+    # 7. Caricamento LLM
+    print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
+    llm = LLMPredictor(max_tokens=MAX_TOKENS, model_type=MODEL_TYPE, debug=DEBUG_LLM)
     llm.load(model_name=LLM_MODEL_NAME, qwen_use_4bit=QWEN_USE_4BIT)
 
-    # 7. Valutazione RAG
-    print_step(f"7. Valutazione RAG (k={K_NEIGHBORS})")
-    output_csv = f"rag_predictions{model_suffix}.csv"
+    # 8. Valutazione RAG
+    print_step(f"6. Valutazione RAG (k={K_NEIGHBORS})")
+    output_csv = "rag_predictions.csv"
     predictions_df = llm.predict(
-        test_texts=test_text.get_texts(),
-        true_labels=test_text.get_targets().tolist(),
+        test_texts=test_texts,
+        true_labels_num=true_labels_num,
         vector_index=index_loaded,
         embedding_model=emb_model,
         k=K_NEIGHBORS,
         output_csv=output_csv
     )
 
+    # 9. Report finale
     y_true = predictions_df['true_label']
     y_pred = predictions_df['prediction']
     acc = (y_true == y_pred).mean()
 
-    print("\n" + "=" * 60)
-    title = f"RAG con LLM {QWEN_MODEL} – RISULTATI"
-    print(" " * ((60 - len(title)) // 2) + title)
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print(" RISULTATI ESPERIMENTO - RAG con LLM ".center(70, "="))
+    print("=" * 70)
     print(f"\nACCURATEZZA: {acc*100:.2f}%")
     print("\nMATRICE DI CONFUSIONE:")
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=['goodware', 'malware'])
     print(pd.DataFrame(cm, index=['goodware', 'malware'], columns=['pred_goodware', 'pred_malware']))
     print("\nCLASSIFICATION REPORT:")
-    print(classification_report(y_true, y_pred, target_names=['goodware', 'malware']))
+    print(classification_report(y_true, y_pred, target_names=['goodware', 'malware'], zero_division=0))
     
-    # Statistiche token
-    print("\nSTATISTICHE TOKEN:")
-    print(f"Prompt tokens - media: {predictions_df['total_prompt_tokens'].mean():.1f}, max: {predictions_df['total_prompt_tokens'].max()}")
-    print(f"Predizioni troncate: {predictions_df['truncated'].sum()} / {len(predictions_df)}")
-    neighbor_len = predictions_df['neighbor_tokens'].apply(lambda s: len(eval(s)) if s != '[]' else 0).mean()
-    print(f"Numero medio di vicini effettivi (con token>0): {neighbor_len:.1f}")
-    
-    print("=" * 60)
-    print(f"\n✅ Completato. CSV salvato in {output_csv}")
+    print("=" * 70)
+    print(f"\n✅ CSV salvato in {output_csv}")
 
 if __name__ == "__main__":
     main()

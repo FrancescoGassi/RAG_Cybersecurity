@@ -22,7 +22,6 @@ def print_step(step_text):
 def main():
     print("=== Test flusso RAG con FAISS ===")
 
-    # Pulizia file vecchi (solo nella cache)
     for f in ['train_texts.pkl', 'test_texts.pkl', 'faiss_index.faiss', 'faiss_index_metadata.pkl']:
         path = os.path.join(CACHE_DIR, f)
         if os.path.exists(path):

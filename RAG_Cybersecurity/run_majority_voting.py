@@ -1,3 +1,9 @@
+"""
+ESPERIMENTO 1: MAJORITY VOTING (k-NN senza LLM)
+- CSV output: majority_voting_predictions.csv
+- Cache: train_texts.pkl, faiss_index_mv (fissi)
+"""
+
 import sys
 import os
 import logging
@@ -5,8 +11,9 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
 
-from src.config import SAMPLE_SIZE, K_NEIGHBORS
+from src.config import SAMPLE_SIZE, K_NEIGHBORS, TEST_LIMIT
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -27,43 +34,51 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 def print_step(step_text):
     print(f"\n{step_text}...")
 
-def main():
-    print("=== MAJORITY VOTING (k-NN senza LLM) ===")
+def print_experiment_params():
+    print("\n" + "=" * 70)
+    print(" PARAMETRI ESPERIMENTO - RAG con MAJORITY VOTING (k-NN SENZA LLM)".center(70))
+    print("=" * 70)
+    print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
+    print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
+    print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
+    print("  Modello LLM            : NON UTILIZZATO")
+    print("=" * 70)
 
-    # 1. Caricamento dataset di training e test
-    print_step("1. Caricamento training e test")
+def main():
+    print_experiment_params()
+    print("\n=== RAG con MAJORITY VOTING (k-NN senza LLM) ===")
+
+    # 1. Caricamento dati
+    print_step("1. Caricamento dataset")
     train_ds = Dataset('DatasetPE/BODMAS_features_named.csv')
     test_ds  = Dataset('DatasetPE/test_named.csv')
     print(f"   Training originale: {len(train_ds)} esempi, {len(train_ds.feature_names)} feature")
     print(f"   Test originale:     {len(test_ds)} esempi, {len(test_ds.feature_names)} feature")
 
-    # Sottocampionamento del training set
     if SAMPLE_SIZE and len(train_ds) > SAMPLE_SIZE:
         df_temp = train_ds.feat_data.copy()
         df_temp['__target__'] = train_ds.target_data
         df_sample = df_temp.sample(n=SAMPLE_SIZE, random_state=42)
         train_ds.feat_data = df_sample.drop('__target__', axis=1)
         train_ds.target_data = df_sample['__target__']
-        print(f"   → Usato sottocampione del training: {SAMPLE_SIZE} esempi")
-    print(f"   Training finale: {len(train_ds)} esempi")
-    print(f"   Test finale:     {len(test_ds)} esempi")
+        print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
 
-    # 2. Calcolo Mutual Information (solo sul training)
+    # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
-    with tqdm(total=1, desc="   Calcolo MI", bar_format="{l_bar}{bar}"):
-        mi = train_ds.compute_mutual_information()
+    print("   Calcolo MI in corso...", end=' ', flush=True)
+    mi = train_ds.compute_mutual_information()
+    print("completato.")
     top5 = list(mi.keys())[:5]
-    print(f"   Top-5 feature (dal training): {', '.join(top5)}")
+    print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature secondo MI (su entrambi i dataset)
-    print_step("3. Ordinamento feature secondo MI")
+    # 3. Ordinamento feature
+    print_step("3. Ordinamento feature per MI")
     train_sorted = train_ds.sort_features_by_mi(mi)
-    test_sorted  = test_ds.sort_features_by_mi(mi)   # stesso ordine delle feature
-    print(f"   Training ordinato: {len(train_sorted)} esempi")
+    test_sorted  = test_ds.sort_features_by_mi(mi)
+    print(f"   Training ordinato: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test ordinato:     {len(test_sorted)} esempi")
 
-    # 4. Conversione in formato testuale
-    print_step("4. Conversione in formato testuale")
+    # 4. Conversione in testo - cache con nome fisso
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -72,51 +87,70 @@ def main():
         test_sorted.save(test_pkl)
     train_text = TextDataset(train_pkl)
     test_text = TextDataset(test_pkl)
-    print("   Testi salvati/ricaricati (in cache/)")
+    print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Generazione embedding e indice FAISS (L2)
-    print_step("5. Generazione embedding e indice FAISS (L2)")
+    # 5. Limitazione test set
+    if TEST_LIMIT is not None:
+        targets = test_text.get_targets().tolist()
+        indices = np.arange(len(targets))
+        if len(np.unique(targets)) == 2 and min(pd.Series(targets).value_counts()) >= TEST_LIMIT // 2:
+            _, sampled_idx = train_test_split(indices, test_size=TEST_LIMIT, stratify=targets, random_state=42)
+        else:
+            sampled_idx = indices[:TEST_LIMIT]
+        test_texts = [test_text.get_texts()[i] for i in sampled_idx]
+        true_labels_num = [targets[i] for i in sampled_idx]
+        print(f"   → Test limitato a {len(test_texts)} campioni (bilanciati: {pd.Series(true_labels_num).value_counts().to_dict()})")
+    else:
+        test_texts = test_text.get_texts()
+        true_labels_num = test_text.get_targets().tolist()
+        print(f"   → Test completo ({len(test_texts)} campioni)")
+
+    # 6. Embedding e indice FAISS (nome fisso per MV)
+    print_step("4. Generazione embedding e indice FAISS (L2)")
     emb_model = Embedding()
-    print("   Creazione embedding del training set...")
     train_emb = train_text.text_to_emb(emb_model)
-    index_prefix = os.path.join(CACHE_DIR, "faiss_index")
+    index_prefix = os.path.join(CACHE_DIR, "faiss_index_mv")
     if not os.path.exists(index_prefix + ".faiss"):
         index = VectorIndex()
         index.build(train_emb, texts=train_text.get_texts(), metric="L2")
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
-    print(f"   Indice FAISS creato (dimensione {index_loaded._dimension})")
+    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
 
-    # 6. Predizione con Majority Voting (k-NN)
-    print_step(f"6. Predizione con Majority Voting (k={K_NEIGHBORS})")
+    # 7. Predizione
+    print_step(f"5. Predizione con Majority Voting (k={K_NEIGHBORS})")
     results = []
-    test_texts = test_text.get_texts()
-    true_labels = test_text.get_targets().tolist()
-    for query, true_label in tqdm(zip(test_texts, true_labels), total=len(test_texts), desc="   Progresso", unit="campione", ncols=80):
+    for query, true_label_num in tqdm(zip(test_texts, true_labels_num), total=len(test_texts), desc="   Progresso"):
         q_emb = emb_model.encode([query])[0]
         _, indices = index_loaded.search(q_emb, k=K_NEIGHBORS)
         _, ret_targets = index_loaded.get_metadata_by_indices(indices)
         counts = np.bincount(ret_targets)
-        pred = int(np.argmax(counts))
-        results.append({'prediction': pred, 'true_label': true_label})
+        pred_num = int(np.argmax(counts))
+        pred_str = "malware" if pred_num == 1 else "goodware"
+        true_label_str = "malware" if true_label_num == 1 else "goodware"
+        results.append({'prediction': pred_str, 'true_label': true_label_str})
 
     df = pd.DataFrame(results)
     output_csv = "majority_voting_predictions.csv"
     df.to_csv(output_csv, index=False)
     acc = (df['prediction'] == df['true_label']).mean()
+    print(f"\n   Accuratezza: {acc*100:.2f}%")
 
-    print("\n" + "=" * 60)
-    print(" " * 15 + "MAJORITY VOTING – RISULTATI")
-    print("=" * 60)
+    # Report
+    y_true = df['true_label']
+    y_pred = df['prediction']
+    print("\n" + "=" * 70)
+    print(" RISULTATI ESPERIMENTO - RAG con MAJORITY VOTING (k-NN senza LLM) ")
+    print("=" * 70)
     print(f"\nACCURATEZZA: {acc*100:.2f}%")
     print("\nMATRICE DI CONFUSIONE:")
-    cm = confusion_matrix(df['true_label'], df['prediction'])
+    cm = confusion_matrix(y_true, y_pred, labels=['goodware', 'malware'])
     print(pd.DataFrame(cm, index=['goodware', 'malware'], columns=['pred_goodware', 'pred_malware']))
     print("\nCLASSIFICATION REPORT:")
-    print(classification_report(df['true_label'], df['prediction'], target_names=['goodware', 'malware']))
-    print("=" * 60)
-    print(f"\n✅ Completato. CSV salvato in {output_csv}")
+    print(classification_report(y_true, y_pred, target_names=['goodware', 'malware']))
+    print("=" * 70)
+    print(f"\n✅ CSV salvato in {output_csv}")
 
 if __name__ == "__main__":
     main()
