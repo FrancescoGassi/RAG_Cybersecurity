@@ -8,7 +8,6 @@ class Embedding:
 
     @classmethod
     def load_model(cls, model_name: str = 'all-MiniLM-L6-v2'):
-        # Sopprimi output di SentenceTransformer
         import logging
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
         return SentenceTransformer(model_name, device="cpu")

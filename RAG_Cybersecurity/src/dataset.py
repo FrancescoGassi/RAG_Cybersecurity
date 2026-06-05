@@ -3,8 +3,10 @@ import numpy as np
 import pickle
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.model_selection import train_test_split
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 import logging
+
+from text_dataset import TextDataset   # import corretto in testa
 
 logging.getLogger(__name__).setLevel(logging.ERROR)
 
@@ -20,7 +22,6 @@ class Dataset:
         self.target_data = df[self.target_name].copy()
         self.feat_data = df.drop(columns=[self.target_name])
         self.feature_names = list(self.feat_data.columns)
-        # Nessun print, solo inizializzazione
 
     def compute_mutual_information(self) -> Dict[str, float]:
         if self.feat_data is None:
@@ -29,10 +30,12 @@ class Dataset:
         mi_dict = dict(zip(self.feature_names, mi))
         return dict(sorted(mi_dict.items(), key=lambda x: x[1], reverse=True))
 
-    def sort_features_by_mi(self, mi_dict: Dict[str, float]) -> 'Dataset':
+    def sort_features_by_mi(self, mi_dict: Dict[str, float], top_k: Optional[int] = None) -> 'Dataset':
         if self.feat_data is None:
             raise ValueError("Dataset non caricato.")
         sorted_features = list(mi_dict.keys())
+        if top_k is not None and top_k > 0:
+            sorted_features = sorted_features[:top_k]
         new_dataset = Dataset.__new__(Dataset)
         new_dataset.target_name = self.target_name
         new_dataset.feature_names = sorted_features
@@ -81,8 +84,7 @@ class Dataset:
         with open(path, 'wb') as f:
             pickle.dump((texts, self.target_data), f)
 
-    def text_to_dataset(self) -> 'TextDataset':
-        from text_dataset import TextDataset
+    def text_to_dataset(self) -> TextDataset:
         texts = [self._row_to_text(i) for i in range(len(self))]
         return TextDataset.from_data(texts, self.target_data)
 

@@ -1,11 +1,17 @@
-# Configurazione
-
-# Modello LLM predefinito (Qwen2-0.5B-Instruct)
+# Nome del modello LLM su Hugging Face
 LLM_MODEL_NAME = "Qwen/Qwen2-0.5B-Instruct"
-MODEL_TYPE = "chat"                  # Qwen è un modello chat
-MAX_TOKENS = 1024                    # Token massimi per il prompt LLM
-K_NEIGHBORS = 5                      # Numero di vicini per k-NN / RAG
-SAMPLE_SIZE = None                   # None = usa tutto il training set
 
-# Quantizzazione 4-bit (solo per modelli grandi, es. Qwen3-4B)
-QWEN_USE_4BIT = False                # Per il modello piccolo (0.5B) non serve
+# Quantizzazione 4-bit (True solo per modelli large e se disponi di GPU)
+QWEN_USE_4BIT = False
+
+# Se True, stampa nella console l'output generato dal modello (utile per debug)
+DEBUG_LLM = True
+
+# Campionamento dei dati
+SAMPLE_SIZE = 40        # Numero di campioni per il training (None = tutto il training)
+TEST_LIMIT = 40         # Numero di campioni per il test (None = tutto il test)
+
+# Parametri del modello RAG
+MODEL_TYPE = "chat"     # "chat" per Qwen (usa il template chat)
+MAX_TOKENS = 1024       # Token massimi per il prompt
+K_NEIGHBORS = 2         # Numero di vicini da recuperare con FAISS
