@@ -167,7 +167,6 @@ class LLMPredictor:
                 'prediction': pred_str,
                 'true_label': true_label_str,
                 'pred_type': pred_type,
-                'generated_text': generated
             })
         
         df = pd.DataFrame(results)
