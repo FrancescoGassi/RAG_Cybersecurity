@@ -14,8 +14,8 @@ class Embedding:
 
     def encode(self, sentences: List[str], batch_size: int = 64) -> np.ndarray:
         """
-        Codifica una lista di frasi in embedding, processando a lotti
-        e normalizzando i vettori per la similarità coseno.
+        Codifica una lista di frasi in embedding, processando a lotti.
+        Nessuna normalizzazione (distanza euclidea L2).
         """
         if isinstance(sentences, str):
             sentences = [sentences]
@@ -26,7 +26,7 @@ class Embedding:
                 batch,
                 convert_to_numpy=True,
                 show_progress_bar=False,
-                normalize_embeddings=True   # fondamentale per IP
+                normalize_embeddings=False   # L2 non richiede normalizzazione
             )
             embeddings.append(batch_embs)
         return np.vstack(embeddings)

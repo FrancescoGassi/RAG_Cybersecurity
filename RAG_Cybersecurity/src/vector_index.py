@@ -15,17 +15,16 @@ class VectorIndex:
         self._index_type = None
 
     def build_from_texts(self, text_dataset: TextDataset, emb_model: Embedding,
-                         metric: str = "IP", batch_size: int = 64):
+                         metric: str = "L2", batch_size: int = 64):
         """
         Costruisce l'indice FAISS direttamente dai testi, processando a lotti.
-        Usa la metrica IP (prodotto scalare) su embedding normalizzati = similarità coseno.
+        Usa la metrica L2 (distanza euclidea).
         """
         texts = text_dataset.get_texts()
         targets = text_dataset.get_targets().tolist()
         if len(texts) == 0:
             raise ValueError("Nessun testo nel dataset")
 
-        # Primo batch per determinare dimensione
         first_batch = texts[:batch_size]
         first_embs = emb_model.encode(first_batch, batch_size=batch_size)
         self._dimension = first_embs.shape[1]
@@ -38,10 +37,8 @@ class VectorIndex:
         else:
             raise ValueError(f"Metrica {metric} non supportata.")
 
-        # Aggiungi primo batch
         self._index.add(first_embs.astype(np.float32))
 
-        # Processa batch successivi
         for i in range(batch_size, len(texts), batch_size):
             batch = texts[i:i+batch_size]
             embs = emb_model.encode(batch, batch_size=batch_size)
@@ -52,8 +49,8 @@ class VectorIndex:
         self._metadata['num_vectors'] = len(texts)
         self._metadata['index_type'] = self._index_type
 
-    # Metodo legacy per compatibilità (se si vuole usare EmbeddingDataset)
-    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "IP"):
+    # Metodo legacy per compatibilità
+    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "L2"):
         embeddings = embedding_dataset.get_embedding()
         self._dimension = embeddings.shape[1]
         self._index_type = metric
