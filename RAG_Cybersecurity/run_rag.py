@@ -62,10 +62,11 @@ def main():
         train_ds.target_data = df_sample['__target__']
         print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
 
-    # 2. Mutual Information
+    # 2. Mutual Information (con sample_size opzionale per ridurre memoria)
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information()
+    # Per sicurezza, usa un campione di 40000 per la MI (si può modificare)
+    mi = train_ds.compute_mutual_information(sample_size=40000)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")

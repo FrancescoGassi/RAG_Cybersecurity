@@ -60,7 +60,8 @@ def main():
     # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information()
+    # Per risparmiare memoria, si può usare un sample_size=40000 nella MI
+    mi = train_ds.compute_mutual_information(sample_size=40000)  # <-- opzionale
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
@@ -72,7 +73,7 @@ def main():
     print(f"   Training ordinato: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test ordinato:     {len(test_sorted)} esempi")
 
-    # 4. Conversione in testo - cache con nome fisso
+    # 4. Conversione in testo - cache
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -112,7 +113,7 @@ def main():
     index_loaded.load(index_prefix)
     print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
 
-    # 7. Predizione con majority voting
+    # 7. Predizione
     print_step(f"5. Predizione con Majority Voting (k={K_NEIGHBORS})")
     results = []
     for query, true_label_num in tqdm(zip(test_texts, true_labels_num), total=len(test_texts), desc="   Progresso"):
@@ -131,7 +132,6 @@ def main():
     acc = (df['prediction'] == df['true_label']).mean()
     print(f"\n   Accuratezza: {acc*100:.2f}%")
 
-    # Report completo
     y_true = df['true_label']
     y_pred = df['prediction']
     print("\n" + "=" * 70)
