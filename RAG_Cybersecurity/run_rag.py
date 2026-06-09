@@ -46,7 +46,6 @@ def print_experiment_params():
     print(" PARAMETRI ESPERIMENTO - RAG con LLM ".center(70))
     print("=" * 70)
     print(f"  Modello LLM            : {LLM_MODEL_NAME}")
-    print(f"  Quantizzazione 4-bit   : {USE_4BIT}")
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
