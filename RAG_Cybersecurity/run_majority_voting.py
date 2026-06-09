@@ -1,9 +1,3 @@
-"""
-ESPERIMENTO 1: MAJORITY VOTING (k-NN senza LLM)
-- CSV output: majority_voting_predictions.csv
-- Cache: train_texts.pkl, faiss_index_mv (fissi)
-"""
-
 import sys
 import os
 import logging
@@ -36,17 +30,18 @@ def print_step(step_text):
 
 def print_experiment_params():
     print("\n" + "=" * 70)
-    print(" PARAMETRI ESPERIMENTO - RAG con MAJORITY VOTING (k-NN SENZA LLM)".center(70))
+    print(" PARAMETRI ESPERIMENTO - MAJORITY VOTING (k-NN) OTTIMIZZATO ".center(70))
     print("=" * 70)
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
+    print(f"  Metrica FAISS          : IP (coseno normalizzato)")
     print("  Modello LLM            : NON UTILIZZATO")
     print("=" * 70)
 
 def main():
     print_experiment_params()
-    print("\n=== RAG con MAJORITY VOTING (k-NN senza LLM) ===")
+    print("\n=== MAJORITY VOTING (k-NN senza LLM) - Versione ottimizzata ===")
 
     # 1. Caricamento dati
     print_step("1. Caricamento dataset")
@@ -71,10 +66,10 @@ def main():
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature
-    print_step("3. Ordinamento feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi)
-    test_sorted  = test_ds.sort_features_by_mi(mi)
+    # 3. Ordinamento feature (TUTTE)
+    print_step("3. Ordinamento completo delle feature per MI")
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
     print(f"   Training ordinato: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test ordinato:     {len(test_sorted)} esempi")
 
@@ -89,7 +84,7 @@ def main():
     test_text = TextDataset(test_pkl)
     print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Limitazione test set
+    # 5. Limitazione test set (bilanciata)
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -105,20 +100,20 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS (nome fisso per MV)
-    print_step("4. Generazione embedding e indice FAISS (L2)")
+    # 6. Embedding e indice FAISS con costruzione incrementale (metrica IP)
+    print_step("4. Generazione embedding e indice FAISS (metrica IP)")
     emb_model = Embedding()
-    train_emb = train_text.text_to_emb(emb_model)
     index_prefix = os.path.join(CACHE_DIR, "faiss_index_mv")
     if not os.path.exists(index_prefix + ".faiss"):
+        print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build(train_emb, texts=train_text.get_texts(), metric="L2")
+        index.build_from_texts(train_text, emb_model, metric="IP", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
-    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
+    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
 
-    # 7. Predizione
+    # 7. Predizione con majority voting
     print_step(f"5. Predizione con Majority Voting (k={K_NEIGHBORS})")
     results = []
     for query, true_label_num in tqdm(zip(test_texts, true_labels_num), total=len(test_texts), desc="   Progresso"):
@@ -137,11 +132,11 @@ def main():
     acc = (df['prediction'] == df['true_label']).mean()
     print(f"\n   Accuratezza: {acc*100:.2f}%")
 
-    # Report
+    # Report completo
     y_true = df['true_label']
     y_pred = df['prediction']
     print("\n" + "=" * 70)
-    print(" RISULTATI ESPERIMENTO - RAG con MAJORITY VOTING (k-NN senza LLM) ")
+    print(" RISULTATI ESPERIMENTO - MAJORITY VOTING (k-NN) OTTIMIZZATO ".center(70, "="))
     print("=" * 70)
     print(f"\nACCURATEZZA: {acc*100:.2f}%")
     print("\nMATRICE DI CONFUSIONE:")
