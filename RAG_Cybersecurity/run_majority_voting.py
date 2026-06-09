@@ -67,7 +67,7 @@ def main():
     print(f"   Top-5 feature: {', '.join(top5)}")
 
     # 3. Ordinamento feature (TUTTE)
-    print_step("3. Ordinamento completo delle feature per MI")
+    print_step("3. Ordinamento delle feature per MI")
     train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
     test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
     print(f"   Training ordinato: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")

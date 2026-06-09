@@ -72,22 +72,22 @@ def main():
         train_ds.target_data = df_sample['__target__']
         print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
 
-    # 2. Mutual Information (usa un campione di 40k per risparmiare memoria)
+    # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
-    print("   Calcolo MI in corso (campione di 40k righe)...", end=' ', flush=True)
+    print("   Calcolo MI in corso...", end=' ', flush=True)
     mi = train_ds.compute_mutual_information(sample_size=None)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature (TUTTE, senza limitazione)
-    print_step("3. Ordinamento completo delle feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
-    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
+    # 3. Ordinamento feature
+    print_step("3. Ordinamento delle feature per MI")
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
     print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
-    # 4. Conversione in testo - cache (nomi fissi)
+    # 4. Conversione in testo - cache
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -98,7 +98,7 @@ def main():
     test_text = TextDataset(test_pkl)
     print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Limitazione test set (per evitare MemoryError su PC con poca RAM)
+    # 5. Limitazione test set
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -110,7 +110,6 @@ def main():
         true_labels_num = [targets[i] for i in sampled_idx]
         print(f"   → Test limitato a {len(test_texts)} campioni (bilanciati: {pd.Series(true_labels_num).value_counts().to_dict()})")
     else:
-        # ATTENZIONE: se il test set è grande (es. 27035 campioni) potrebbe causare MemoryError
         test_texts = test_text.get_texts()
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
