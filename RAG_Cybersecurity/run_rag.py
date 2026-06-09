@@ -65,16 +65,15 @@ def main():
     # 2. Mutual Information (con sample_size opzionale per ridurre memoria)
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    # Per sicurezza, usa un campione di 40000 per la MI (si può modificare)
     mi = train_ds.compute_mutual_information(sample_size=40000)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature (TUTTE)
+    # 3. Ordinamento feature
     print_step("3. Ordinamento completo delle feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
-    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=1000)
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=1000)
     print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
