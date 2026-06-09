@@ -37,13 +37,10 @@ def print_experiment_params():
     print(" PARAMETRI ESPERIMENTO - RAG con LLM ".center(70))
     print("=" * 70)
     print(f"  Modello LLM            : {LLM_MODEL_NAME}")
-    print(f"  Quantizzazione 4-bit   : {USE_4BIT}")
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
     print(f"  Token massimi prompt   : {MAX_TOKENS}")
-    print(f"  Debug LLM              : {DEBUG_LLM}")
-    print(f"  Metrica FAISS          : IP (coseno normalizzato)")
     print("=" * 70)
 
 def main():
@@ -107,14 +104,14 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS (costruzione incrementale)
-    print_step("4. Generazione embedding e indice FAISS (metrica IP)")
+    # 6. Embedding e indice FAISS (costruzione incrementale, metrica L2)
+    print_step("4. Generazione embedding e indice FAISS (metrica L2)")
     emb_model = Embedding()
     index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
         print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build_from_texts(train_text, emb_model, metric="IP", batch_size=64)
+        index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)

@@ -30,18 +30,17 @@ def print_step(step_text):
 
 def print_experiment_params():
     print("\n" + "=" * 70)
-    print(" PARAMETRI ESPERIMENTO - MAJORITY VOTING (k-NN) OTTIMIZZATO ".center(70))
+    print(" PARAMETRI ESPERIMENTO - MAJORITY VOTING (k-NN) ".center(70))
     print("=" * 70)
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
-    print(f"  Metrica FAISS          : IP (coseno normalizzato)")
     print("  Modello LLM            : NON UTILIZZATO")
     print("=" * 70)
 
 def main():
     print_experiment_params()
-    print("\n=== MAJORITY VOTING (k-NN senza LLM) - Versione ottimizzata ===")
+    print("\n=== MAJORITY VOTING (k-NN senza LLM) ===")
 
     # 1. Caricamento dati
     print_step("1. Caricamento dataset")
@@ -100,14 +99,14 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS con costruzione incrementale (metrica IP)
-    print_step("4. Generazione embedding e indice FAISS (metrica IP)")
+    # 6. Embedding e indice FAISS con costruzione incrementale (metrica L2)
+    print_step("4. Generazione embedding e indice FAISS (metrica L2)")
     emb_model = Embedding()
     index_prefix = os.path.join(CACHE_DIR, "faiss_index_mv")
     if not os.path.exists(index_prefix + ".faiss"):
         print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build_from_texts(train_text, emb_model, metric="IP", batch_size=64)
+        index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
@@ -136,7 +135,7 @@ def main():
     y_true = df['true_label']
     y_pred = df['prediction']
     print("\n" + "=" * 70)
-    print(" RISULTATI ESPERIMENTO - MAJORITY VOTING (k-NN) OTTIMIZZATO ".center(70, "="))
+    print(" RISULTATI ESPERIMENTO - MAJORITY VOTING (k-NN) ".center(70, "="))
     print("=" * 70)
     print(f"\nACCURATEZZA: {acc*100:.2f}%")
     print("\nMATRICE DI CONFUSIONE:")
