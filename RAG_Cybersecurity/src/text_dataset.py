@@ -2,8 +2,8 @@ import pickle
 import pandas as pd
 import numpy as np
 from typing import List
-from embedding import Embedding
-from embedding_dataset import EmbeddingDataset
+from src.embedding import Embedding
+from src.embedding_dataset import EmbeddingDataset
 
 class TextDataset:
     def __init__(self, path: str):
