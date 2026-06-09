@@ -3,9 +3,9 @@ import numpy as np
 import pickle
 import os
 from typing import Tuple, List, Union
-from embedding_dataset import EmbeddingDataset
-from text_dataset import TextDataset
-from embedding import Embedding
+from src.embedding_dataset import EmbeddingDataset
+from src.text_dataset import TextDataset
+from src.embedding import Embedding
 
 class VectorIndex:
     def __init__(self, dimension: int = None):

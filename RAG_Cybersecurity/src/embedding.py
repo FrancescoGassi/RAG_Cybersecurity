@@ -1,5 +1,6 @@
 from sentence_transformers import SentenceTransformer
 import numpy as np
+import torch
 from typing import List
 import logging
 
@@ -10,13 +11,10 @@ class Embedding:
     @classmethod
     def load_model(cls, model_name: str = 'all-MiniLM-L6-v2'):
         logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
-        return SentenceTransformer(model_name, device="cpu")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return SentenceTransformer(model_name, device=device)
 
     def encode(self, sentences: List[str], batch_size: int = 64) -> np.ndarray:
-        """
-        Codifica una lista di frasi in embedding, processando a lotti.
-        Nessuna normalizzazione (distanza euclidea L2).
-        """
         if isinstance(sentences, str):
             sentences = [sentences]
         embeddings = []

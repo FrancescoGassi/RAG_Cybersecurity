@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Dict, Optional
 import logging
 
-from text_dataset import TextDataset
+from src.text_dataset import TextDataset
 
 logging.getLogger(__name__).setLevel(logging.ERROR)
 
@@ -24,11 +24,6 @@ class Dataset:
         self.feature_names = list(self.feat_data.columns)
 
     def compute_mutual_information(self, sample_size: Optional[int] = None) -> Dict[str, float]:
-        """
-        Calcola la Mutual Information. Se sample_size è specificato (es. 40000),
-        utilizza un campione casuale per ridurre la memoria.
-        Converte i dati in float32 per dimezzare l'occupazione.
-        """
         if self.feat_data is None:
             raise ValueError("Dataset non caricato.")
         

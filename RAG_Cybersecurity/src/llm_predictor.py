@@ -146,21 +146,23 @@ class LLMPredictor:
             if self.debug:
                 print(f"\n[DEBUG] Sample {idx}: generated = '{generated}'")
             
-            first_word = generated.split()[0].lower().strip('.,!?') if generated else ""
-            if first_word == "malware":
+            # Migliorato: cerca le parole "malware" o "goodware" in tutta la risposta
+            generated_lower = generated.lower()
+            if "malware" in generated_lower:
                 pred_str = "malware"
                 pred_type = "llm"
-            elif first_word == "goodware":
+            elif "goodware" in generated_lower:
                 pred_str = "goodware"
                 pred_type = "llm"
             else:
+                # fallback a majority voting
                 ret_labels_arr = np.array(ret_targets)
                 counts = np.bincount(ret_labels_arr)
                 pred_num = int(np.argmax(counts))
                 pred_str = "malware" if pred_num == 1 else "goodware"
                 pred_type = "mv"
                 if self.debug:
-                    print(f"[DEBUG] Fallback to MV, generated='{generated}', first_word='{first_word}'")
+                    print(f"[DEBUG] Fallback to MV, generated='{generated}'")
             
             true_label_str = "malware" if true_label_num == 1 else "goodware"
             
