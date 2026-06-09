@@ -1,11 +1,3 @@
-"""
-ESPERIMENTO 2: RAG con LLM
-- CSV output: rag_predictions.csv
-- Cache: train_texts.pkl, test_texts.pkl, faiss_index
-- Usa TUTTE le feature (nessuna selezione top-k)
-- Nota: su macchine con poca RAM, impostare TEST_LIMIT in config.py (es. 5000)
-"""
-
 import sys
 import os
 import logging
@@ -14,7 +6,6 @@ import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 
-# Aggiunge la directory padre al path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (
