@@ -8,8 +8,8 @@ QWEN_USE_4BIT = False
 DEBUG_LLM = True
 
 # Campionamento dei dati
-SAMPLE_SIZE = 40        # Numero di campioni per il training (None = tutto il training)
-TEST_LIMIT = 40         # Numero di campioni per il test (None = tutto il test)
+SAMPLE_SIZE = None        # Numero di campioni per il training (None = tutto il training)
+TEST_LIMIT = None         # Numero di campioni per il test (None = tutto il test)
 
 # Parametri del modello RAG
 MODEL_TYPE = "chat"     # "chat" per Qwen (usa il template chat)
