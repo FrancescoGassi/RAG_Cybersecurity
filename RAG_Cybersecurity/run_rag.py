@@ -1,10 +1,3 @@
-"""
-ESPERIMENTO 2: RAG con LLM
-- CSV output: rag_predictions.csv (nome fisso)
-- Cache: train_texts.pkl, test_texts.pkl, faiss_index (condivisi con MV)
-- Usa solo le prime 100 feature per Mutual Information
-"""
-
 import sys
 import os
 import logging
@@ -19,9 +12,6 @@ from src.config import (
     DEBUG_LLM, SAMPLE_SIZE, TEST_LIMIT,
     LLM_MODEL_NAME, QWEN_USE_4BIT
 )
-
-# Forza l'uso di un numero ridotto di feature (le più informative)
-TOP_FEATURES = 100
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -54,7 +44,6 @@ def print_experiment_params():
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
     print(f"  Token massimi prompt   : {MAX_TOKENS}")
     print(f"  Debug LLM              : {DEBUG_LLM}")
-    print(f"  Top feature selezionate: {TOP_FEATURES}")
     print("=" * 70)
 
 def main():
@@ -84,14 +73,15 @@ def main():
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature e selezione top-k
-    print_step(f"3. Selezione delle prime {TOP_FEATURES} feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi, top_k=TOP_FEATURES)
-    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=TOP_FEATURES)
+    # 3. Ordinamento feature (TUTTE, senza limitazione)
+    print_step("3. Ordinamento completo delle feature per MI")
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
     print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
-    # 4. Conversione in testo - cache (separata per il numero di feature, ma usiamo nomi fissi per semplicità)
+    # 4. Conversione in testo - cache (nomi fissi, ma ora con tutte le feature)
+    #    È consigliabile cancellare i file cache esistenti per rigenerarli con il set completo.
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
