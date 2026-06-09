@@ -6,7 +6,7 @@ from typing import List, Optional
 import logging
 from tqdm import tqdm
 
-from src.config import LLM_MODEL_NAME, MAX_TOKENS, QWEN_USE_4BIT, MODEL_TYPE
+from src.config import LLM_MODEL_NAME, MAX_TOKENS, USE_4BIT, MODEL_TYPE
 
 logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
@@ -18,23 +18,24 @@ class LLMPredictor:
         self.device = None
         self.max_tokens = max_tokens
         self.model_type = model_type if model_type else MODEL_TYPE
-        self.qwen_use_4bit = QWEN_USE_4BIT
+        self.use_4bit = USE_4BIT
         self.debug = debug
+        self.model_name = LLM_MODEL_NAME
 
-    def load(self, model_name: Optional[str] = None, device: Optional[str] = None, qwen_use_4bit: Optional[bool] = None):
+    def load(self, model_name: Optional[str] = None, device: Optional[str] = None, use_4bit: Optional[bool] = None):
         if model_name is None:
             model_name = LLM_MODEL_NAME
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
             self.device = device
-        if qwen_use_4bit is not None:
-            self.qwen_use_4bit = qwen_use_4bit
+        if use_4bit is not None:
+            self.use_4bit = use_4bit
 
         print(f"   Caricamento {model_name} su {self.device} (tipo: {self.model_type})...")
         
         quant_config = None
-        if self.model_type == "chat" and self.qwen_use_4bit and self.device == "cuda":
+        if self.use_4bit and self.device == "cuda":
             quant_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
@@ -45,8 +46,13 @@ class LLMPredictor:
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.tokenizer.truncation_side = "right"
+        
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -64,10 +70,7 @@ class LLMPredictor:
         tokens = self.tokenizer.encode(text, truncation=True, max_length=max_tokens)
         return self.tokenizer.decode(tokens, skip_special_tokens=True)
 
-    def buildPrompt(self, retrieved_texts: List[str], retrieved_labels: List[int], query_text: str):
-        """
-        Costruisce il prompt
-        """
+    def build_prompt(self, retrieved_texts: List[str], retrieved_labels: List[int], query_text: str):
         system_prompt = (
             "You are a cybersecurity expert. Classify Windows PE applications based on their features.\n"
             "The features are extracted from PE files using the EMBER library and LIEF tool. "
@@ -75,15 +78,14 @@ class LLMPredictor:
             "Below are similar examples that can be labeled as malware or goodware:\n"
         )
         
-        # Usa al massimo 2 esempi (per limitare la lunghezza)
-        max_examples = min(2, len(retrieved_texts))
+        max_examples = min(3, len(retrieved_texts))
         examples_str = ""
         for i in range(max_examples):
-            text = self.truncate_text(retrieved_texts[i], 200)   # Ogni esempio max 200 token
+            text = self.truncate_text(retrieved_texts[i], 200)
             label = "malware" if retrieved_labels[i] == 1 else "goodware"
             examples_str += f"{i+1}. {text}\n   Class: {label}\n\n"
         
-        query_trunc = self.truncate_text(query_text, 300)        # Query max 300 token
+        query_trunc = self.truncate_text(query_text, 300)
         
         user_content = (
             f"{examples_str}"
@@ -105,7 +107,7 @@ class LLMPredictor:
         return prompt, total_tokens
 
     def predict(self, test_texts: List[str], true_labels_num: List[int],
-                vector_index, embedding_model, k: int, output_csv: str):
+                vector_index, embedding_model, k: int, output_csv: str) -> pd.DataFrame:
         if self.model is None:
             raise ValueError("Chiamare load() prima di predict().")
         
@@ -119,10 +121,10 @@ class LLMPredictor:
             _, indices = vector_index.search(q_emb, k=k)
             ret_texts, ret_targets = vector_index.get_metadata_by_indices(indices)
             
-            prompt, total_tokens = self.buildPrompt(ret_texts, ret_targets, query)
-            token_counts.append(total_tokens)
+            prompt, total_tokens_prompt = self.build_prompt(ret_texts, ret_targets, query)
+            token_counts.append(total_tokens_prompt)
             
-            if total_tokens > self.max_tokens:
+            if total_tokens_prompt > self.max_tokens:
                 inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=self.max_tokens).to(self.device)
             else:
                 inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
@@ -136,8 +138,8 @@ class LLMPredictor:
                     temperature=0.0,
                     eos_token_id=self.tokenizer.eos_token_id
                 )
-            generated = self.tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
             
+            generated = self.tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
             if not generated:
                 generated = ""
             
@@ -152,7 +154,6 @@ class LLMPredictor:
                 pred_str = "goodware"
                 pred_type = "llm"
             else:
-                # Fallback al majority voting
                 ret_labels_arr = np.array(ret_targets)
                 counts = np.bincount(ret_labels_arr)
                 pred_num = int(np.argmax(counts))

@@ -4,6 +4,8 @@ import pickle
 import os
 from typing import Tuple, List, Union
 from embedding_dataset import EmbeddingDataset
+from text_dataset import TextDataset
+from embedding import Embedding
 
 class VectorIndex:
     def __init__(self, dimension: int = None):
@@ -12,7 +14,46 @@ class VectorIndex:
         self._metadata = {}
         self._index_type = None
 
-    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "L2"):
+    def build_from_texts(self, text_dataset: TextDataset, emb_model: Embedding,
+                         metric: str = "IP", batch_size: int = 64):
+        """
+        Costruisce l'indice FAISS direttamente dai testi, processando a lotti.
+        Usa la metrica IP (prodotto scalare) su embedding normalizzati = similarità coseno.
+        """
+        texts = text_dataset.get_texts()
+        targets = text_dataset.get_targets().tolist()
+        if len(texts) == 0:
+            raise ValueError("Nessun testo nel dataset")
+
+        # Primo batch per determinare dimensione
+        first_batch = texts[:batch_size]
+        first_embs = emb_model.encode(first_batch, batch_size=batch_size)
+        self._dimension = first_embs.shape[1]
+        self._index_type = metric
+
+        if metric == "L2":
+            self._index = faiss.IndexFlatL2(self._dimension)
+        elif metric == "IP":
+            self._index = faiss.IndexFlatIP(self._dimension)
+        else:
+            raise ValueError(f"Metrica {metric} non supportata.")
+
+        # Aggiungi primo batch
+        self._index.add(first_embs.astype(np.float32))
+
+        # Processa batch successivi
+        for i in range(batch_size, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            embs = emb_model.encode(batch, batch_size=batch_size)
+            self._index.add(embs.astype(np.float32))
+
+        self._metadata['targets'] = targets
+        self._metadata['texts'] = texts
+        self._metadata['num_vectors'] = len(texts)
+        self._metadata['index_type'] = self._index_type
+
+    # Metodo legacy per compatibilità (se si vuole usare EmbeddingDataset)
+    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "IP"):
         embeddings = embedding_dataset.get_embedding()
         self._dimension = embeddings.shape[1]
         self._index_type = metric
@@ -35,7 +76,6 @@ class VectorIndex:
         faiss.write_index(self._index, base_path + ".faiss")
         with open(base_path + "_metadata.pkl", 'wb') as f:
             pickle.dump(self._metadata, f)
-        # print silenziato
 
     def load(self, path: str):
         base_path = os.path.splitext(path)[0]
