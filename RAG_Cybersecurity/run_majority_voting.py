@@ -66,14 +66,12 @@ def main():
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature (TUTTE)
+    # 3. Ordinamento feature
     print_step("3. Ordinamento delle feature per MI")
     train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
     test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
-    print(f"   Training ordinato: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
-    print(f"   Test ordinato:     {len(test_sorted)} esempi")
 
-    # 4. Conversione in testo - cache
+    # Conversione in testo - cache
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -84,7 +82,7 @@ def main():
     test_text = TextDataset(test_pkl)
     print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Limitazione test set (bilanciata)
+    # Limitazione test set (bilanciata)
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -100,7 +98,7 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS con costruzione incrementale (metrica L2)
+    # 4. Embedding e indice FAISS con costruzione incrementale (metrica L2)
     print_step("4. Generazione embedding e indice FAISS (metrica L2)")
     emb_model = Embedding()
     index_prefix = os.path.join(CACHE_DIR, "faiss_index_mv")
@@ -113,7 +111,7 @@ def main():
     index_loaded.load(index_prefix)
     print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
 
-    # 7. Predizione
+    # 5.Predizione
     print_step(f"5. Predizione con Majority Voting (k={K_NEIGHBORS})")
     results = []
     for query, true_label_num in tqdm(zip(test_texts, true_labels_num), total=len(test_texts), desc="   Progresso"):
@@ -132,6 +130,7 @@ def main():
     acc = (df['prediction'] == df['true_label']).mean()
     print(f"\n   Accuratezza: {acc*100:.2f}%")
 
+    # Report finale
     y_true = df['true_label']
     y_pred = df['prediction']
     print("\n" + "=" * 70)

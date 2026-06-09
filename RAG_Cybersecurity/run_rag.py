@@ -74,10 +74,8 @@ def main():
     print_step("3. Ordinamento delle feature per MI")
     train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
     test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
-    print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
-    print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
-    # 4. Conversione in testo - cache
+    # Conversione in testo - cache
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -88,7 +86,7 @@ def main():
     test_text = TextDataset(test_pkl)
     print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Limitazione test set
+    # Limitazione test set
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -104,7 +102,7 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS (L2, costruzione incrementale)
+    # 4. Embedding e indice FAISS (L2, costruzione incrementale)
     print_step("4. Generazione embedding e indice FAISS (L2)")
     emb_model = Embedding()
     train_emb = train_text.text_to_emb(emb_model)
@@ -117,12 +115,12 @@ def main():
     index_loaded.load(index_prefix)
     print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
 
-    # 7. Caricamento LLM
+    # 5. Caricamento LLM
     print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
     llm = LLMPredictor(max_tokens=MAX_TOKENS, model_type=MODEL_TYPE, debug=DEBUG_LLM)
     llm.load(model_name=LLM_MODEL_NAME, use_4bit=USE_4BIT)
 
-    # 8. Valutazione RAG
+    # 6. Valutazione RAG
     print_step(f"6. Valutazione RAG (k={K_NEIGHBORS})")
     output_csv = "rag_predictions.csv"
     predictions_df = llm.predict(
@@ -134,7 +132,7 @@ def main():
         output_csv=output_csv
     )
 
-    # 9. Report finale
+    # Report finale
     y_true = predictions_df['true_label']
     y_pred = predictions_df['prediction']
     acc = (y_true == y_pred).mean()
