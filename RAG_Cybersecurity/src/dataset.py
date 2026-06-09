@@ -6,7 +6,7 @@ from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Dict, Optional
 import logging
 
-from text_dataset import TextDataset   # import corretto in testa
+from text_dataset import TextDataset
 
 logging.getLogger(__name__).setLevel(logging.ERROR)
 
@@ -23,10 +23,25 @@ class Dataset:
         self.feat_data = df.drop(columns=[self.target_name])
         self.feature_names = list(self.feat_data.columns)
 
-    def compute_mutual_information(self) -> Dict[str, float]:
+    def compute_mutual_information(self, sample_size: Optional[int] = None) -> Dict[str, float]:
+        """
+        Calcola la Mutual Information. Se sample_size è specificato (es. 40000),
+        utilizza un campione casuale per ridurre la memoria.
+        Converte i dati in float32 per dimezzare l'occupazione.
+        """
         if self.feat_data is None:
             raise ValueError("Dataset non caricato.")
-        mi = mutual_info_classif(self.feat_data, self.target_data, random_state=42, n_jobs=-1)
+        
+        # Se richiesto, usa un sottocampione per il calcolo della MI
+        if sample_size is not None and len(self.feat_data) > sample_size:
+            sampled_idx = self.feat_data.sample(n=sample_size, random_state=42).index
+            X = self.feat_data.loc[sampled_idx].astype(np.float32)
+            y = self.target_data.loc[sampled_idx]
+        else:
+            X = self.feat_data.astype(np.float32)
+            y = self.target_data
+
+        mi = mutual_info_classif(X, y, random_state=42, n_jobs=-1)
         mi_dict = dict(zip(self.feature_names, mi))
         return dict(sorted(mi_dict.items(), key=lambda x: x[1], reverse=True))
 

@@ -49,7 +49,6 @@ class VectorIndex:
         self._metadata['num_vectors'] = len(texts)
         self._metadata['index_type'] = self._index_type
 
-    # Metodo legacy per compatibilità
     def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "L2"):
         embeddings = embedding_dataset.get_embedding()
         self._dimension = embeddings.shape[1]

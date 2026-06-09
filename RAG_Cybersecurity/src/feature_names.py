@@ -1,12 +1,6 @@
 from typing import List, Dict
 
 class BODMASFeatureNames:
-    """
-    Nomi simbolici delle 2381 feature estratte dalla libreria LIEF
-    per l'analisi statica di file Windows PE.
-    I gruppi seguono l'ordine definito nel paper OLIVANDER.
-    """
-
     BYTE_HISTOGRAM_FEATURES = [f"byte_histogram_{i}" for i in range(256)]
     BYTE_ENTROPY_FEATURES = [f"byte_entropy_{i}" for i in range(256)]
     STRING_FEATURES = [f"string_{i}" for i in range(104)]
