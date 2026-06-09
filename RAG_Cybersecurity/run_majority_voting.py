@@ -61,7 +61,7 @@ def main():
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
     # Per risparmiare memoria, si può usare un sample_size=40000 nella MI
-    mi = train_ds.compute_mutual_information(sample_size=40000)  # <-- opzionale
+    mi = train_ds.compute_mutual_information(sample_size=None)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")

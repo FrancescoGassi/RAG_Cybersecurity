@@ -1,8 +1,17 @@
+"""
+ESPERIMENTO 2: RAG con LLM
+- CSV output: rag_predictions.csv
+- Cache: train_texts.pkl, test_texts.pkl, faiss_index
+- Usa TUTTE le feature (nessuna selezione top-k)
+- Nota: su macchine con poca RAM, impostare TEST_LIMIT in config.py (es. 5000)
+"""
+
 import sys
 import os
 import logging
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 
@@ -37,6 +46,7 @@ def print_experiment_params():
     print(" PARAMETRI ESPERIMENTO - RAG con LLM ".center(70))
     print("=" * 70)
     print(f"  Modello LLM            : {LLM_MODEL_NAME}")
+    print(f"  Quantizzazione 4-bit   : {USE_4BIT}")
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
@@ -62,22 +72,22 @@ def main():
         train_ds.target_data = df_sample['__target__']
         print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
 
-    # 2. Mutual Information (con sample_size opzionale per ridurre memoria)
+    # 2. Mutual Information (usa un campione di 40k per risparmiare memoria)
     print_step("2. Calcolo Mutual Information (sul training)")
-    print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information(sample_size=40000)
+    print("   Calcolo MI in corso (campione di 40k righe)...", end=' ', flush=True)
+    mi = train_ds.compute_mutual_information(sample_size=None)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
 
-    # 3. Ordinamento feature
+    # 3. Ordinamento feature (TUTTE, senza limitazione)
     print_step("3. Ordinamento completo delle feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi, top_k=1000)
-    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=1000)
+    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
+    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)   # tutte le feature
     print(f"   Training finale: {len(train_sorted)} esempi, {len(train_sorted.feature_names)} feature")
     print(f"   Test finale:     {len(test_sorted)} esempi, {len(test_sorted.feature_names)} feature")
 
-    # 4. Conversione in testo - cache
+    # 4. Conversione in testo - cache (nomi fissi)
     train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
     test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
     if not os.path.exists(train_pkl):
@@ -88,7 +98,7 @@ def main():
     test_text = TextDataset(test_pkl)
     print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
 
-    # 5. Limitazione test set bilanciata
+    # 5. Limitazione test set (per evitare MemoryError su PC con poca RAM)
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -100,22 +110,23 @@ def main():
         true_labels_num = [targets[i] for i in sampled_idx]
         print(f"   → Test limitato a {len(test_texts)} campioni (bilanciati: {pd.Series(true_labels_num).value_counts().to_dict()})")
     else:
+        # ATTENZIONE: se il test set è grande (es. 27035 campioni) potrebbe causare MemoryError
         test_texts = test_text.get_texts()
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 6. Embedding e indice FAISS (costruzione incrementale, metrica L2)
-    print_step("4. Generazione embedding e indice FAISS (metrica L2)")
+    # 6. Embedding e indice FAISS (L2, costruzione incrementale)
+    print_step("4. Generazione embedding e indice FAISS (L2)")
     emb_model = Embedding()
+    train_emb = train_text.text_to_emb(emb_model)
     index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
-        print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
+        index.build(train_emb, texts=train_text.get_texts(), metric="L2")
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
-    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
+    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
 
     # 7. Caricamento LLM
     print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
