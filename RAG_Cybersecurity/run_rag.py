@@ -11,9 +11,11 @@ import os
 import logging
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
+
+# Aggiunge la directory padre al path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config import (
     MAX_TOKENS, K_NEIGHBORS, MODEL_TYPE,
@@ -26,8 +28,6 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 for lib in ["huggingface_hub", "httpx", "sentence_transformers", "transformers", "urllib3", "faiss", "torch", "filelock", "datasets"]:
     logging.getLogger(lib).setLevel(logging.ERROR)
-
-sys.path.insert(0, 'src')
 
 from src.dataset import Dataset
 from src.text_dataset import TextDataset

@@ -1,5 +1,11 @@
-import csv
+import sys
+import os
+
+# Aggiunge la directory padre (dove si trova 'src') al path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from src.feature_names import BODMASFeatureNames
+import csv
 
 feature_names = BODMASFeatureNames.get_all_feature_names()
 

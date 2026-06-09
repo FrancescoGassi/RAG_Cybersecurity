@@ -7,6 +7,9 @@ from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 
+# Aggiunge la directory padre al path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from src.config import SAMPLE_SIZE, K_NEIGHBORS, TEST_LIMIT
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -14,8 +17,6 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 for lib in ["huggingface_hub", "sentence_transformers", "transformers", "faiss", "torch"]:
     logging.getLogger(lib).setLevel(logging.ERROR)
-
-sys.path.insert(0, 'src')
 
 from src.dataset import Dataset
 from src.text_dataset import TextDataset
@@ -60,7 +61,6 @@ def main():
     # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    # Per risparmiare memoria, si può usare un sample_size=40000 nella MI
     mi = train_ds.compute_mutual_information(sample_size=None)
     print("completato.")
     top5 = list(mi.keys())[:5]

@@ -3,15 +3,15 @@ import os
 import logging
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-from dataset import Dataset
-from text_dataset import TextDataset
-from embedding import Embedding
-from vector_index import VectorIndex
+from src.dataset import Dataset
+from src.text_dataset import TextDataset
+from src.embedding import Embedding
+from src.vector_index import VectorIndex
 
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
