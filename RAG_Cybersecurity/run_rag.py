@@ -103,7 +103,7 @@ def main():
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
     # 4. Embedding e indice FAISS con costruzione incrementale (metrica L2)
-    print_step("4. Generazione embedding e indice FAISS (L2)")
+    print_step("4. Generazione embedding e indice FAISS (metrica L2)")
     emb_model = Embedding()
     index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
