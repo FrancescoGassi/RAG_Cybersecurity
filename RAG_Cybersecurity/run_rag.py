@@ -109,7 +109,6 @@ def main():
     if not os.path.exists(index_prefix + ".faiss"):
         print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        # Usa build_from_texts invece di build
         index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
