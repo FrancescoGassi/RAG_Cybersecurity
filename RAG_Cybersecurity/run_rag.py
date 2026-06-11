@@ -102,18 +102,19 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 4. Embedding e indice FAISS (L2, costruzione incrementale)
+    # 4. Embedding e indice FAISS con costruzione incrementale (metrica L2)
     print_step("4. Generazione embedding e indice FAISS (L2)")
     emb_model = Embedding()
-    train_emb = train_text.text_to_emb(emb_model)
     index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
+        print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build(train_emb, texts=train_text.get_texts(), metric="L2")
+        # Usa build_from_texts invece di build
+        index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
-    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension})")
+    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
 
     # 5. Caricamento LLM
     print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
