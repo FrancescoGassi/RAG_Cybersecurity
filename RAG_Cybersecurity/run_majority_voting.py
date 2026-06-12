@@ -36,7 +36,7 @@ def print_experiment_params():
     print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
     print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
     print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
-    print("  Modello LLM            : NON UTILIZZATO")
+    print("  Modello LLM             : NON UTILIZZATO")
     print("=" * 70)
 
 def main():
@@ -61,7 +61,7 @@ def main():
     # 2. Mutual Information
     print_step("2. Calcolo Mutual Information (sul training)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information(sample_size=None)
+    mi = train_ds.compute_mutual_information(sample_size=SAMPLE_SIZE)
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")

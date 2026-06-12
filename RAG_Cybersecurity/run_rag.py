@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.config import (
     MAX_TOKENS, K_NEIGHBORS, MODEL_TYPE,
@@ -51,21 +51,39 @@ def main():
     print_step("1. Caricamento dataset")
     train_ds = Dataset('DatasetPE/BODMAS_features_named.csv')
     test_ds  = Dataset('DatasetPE/test_named.csv')
+    
+    print("\n--- Distribuzione classi (TRAINING) ---")
+    train_counts = train_ds.target_data.value_counts()
+    print(train_counts)
+    unique_train = train_ds.target_data.unique()
+    print(f"Valori unici nel target del training: {unique_train}")
+    if len(unique_train) < 2:
+        print("⚠️ ATTENZIONE: Il training set contiene una sola classe!")
+        return
+    
+    print("\n--- Distribuzione classi (TEST) ---")
+    test_counts = test_ds.target_data.value_counts()
+    print(test_counts)
+    
     print(f"   Training originale: {len(train_ds)} esempi, {len(train_ds.feature_names)} feature")
     print(f"   Test originale:     {len(test_ds)} esempi, {len(test_ds.feature_names)} feature")
 
     if SAMPLE_SIZE and len(train_ds) > SAMPLE_SIZE:
-        df_temp = train_ds.feat_data.copy()
-        df_temp['__target__'] = train_ds.target_data
-        df_sample = df_temp.sample(n=SAMPLE_SIZE, random_state=42)
-        train_ds.feat_data = df_sample.drop('__target__', axis=1)
-        train_ds.target_data = df_sample['__target__']
-        print(f"   → Training ridotto a {SAMPLE_SIZE} esempi")
+        # Stratify per mantenere la proporzione delle classi
+        _, sampled_idx = train_test_split(
+            np.arange(len(train_ds.target_data)),
+            test_size=SAMPLE_SIZE,
+            stratify=train_ds.target_data,
+            random_state=42
+        )
+        train_ds.feat_data = train_ds.feat_data.iloc[sampled_idx]
+        train_ds.target_data = train_ds.target_data.iloc[sampled_idx]
+        print(f"   → Training ridotto a {SAMPLE_SIZE} esempi (bilanciato: {train_ds.target_data.value_counts().to_dict()})")
 
-    # 2. Mutual Information
-    print_step("2. Calcolo Mutual Information (sul training)")
+    # 2. Mutual Information (usa SOLO i dati del training ridotto, senza ulteriore campionamento)
+    print_step("2. Calcolo Mutual Information (sul training ridotto)")
     print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information(sample_size=None)
+    mi = train_ds.compute_mutual_information(sample_size=None)   # <-- CORRETTO: usa tutto il training ridotto
     print("completato.")
     top5 = list(mi.keys())[:5]
     print(f"   Top-5 feature: {', '.join(top5)}")
@@ -84,9 +102,9 @@ def main():
         test_sorted.save(test_pkl)
     train_text = TextDataset(train_pkl)
     test_text = TextDataset(test_pkl)
-    print("   Testi salvati/ricaricati in cache/ (train_texts.pkl, test_texts.pkl)")
+    print("   Testi salvati/ricaricati in cache/")
 
-    # Limitazione test set
+    # Limitazione test set (stratificata)
     if TEST_LIMIT is not None:
         targets = test_text.get_targets().tolist()
         indices = np.arange(len(targets))
@@ -102,20 +120,20 @@ def main():
         true_labels_num = test_text.get_targets().tolist()
         print(f"   → Test completo ({len(test_texts)} campioni)")
 
-    # 4. Embedding e indice FAISS con costruzione incrementale (metrica L2)
-    print_step("4. Generazione embedding e indice FAISS (metrica L2)")
+    # 4. Embedding e indice FAISS
+    print_step("4. Generazione embedding e indice FAISS (metrica IP)")
     emb_model = Embedding()
     index_prefix = os.path.join(CACHE_DIR, "faiss_index")
     if not os.path.exists(index_prefix + ".faiss"):
         print("   Costruzione indice incrementale da testi...")
         index = VectorIndex()
-        index.build_from_texts(train_text, emb_model, metric="L2", batch_size=64)
+        index.build_from_texts(train_text, emb_model, metric="IP", batch_size=64)
         index.save(index_prefix)
     index_loaded = VectorIndex()
     index_loaded.load(index_prefix)
     print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
 
-    # 5. Caricamento LLM
+    # 5. Caricamento LLM (solo se il modello è stato cambiato in uno più potente)
     print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
     llm = LLMPredictor(max_tokens=MAX_TOKENS, model_type=MODEL_TYPE, debug=DEBUG_LLM)
     llm.load(model_name=LLM_MODEL_NAME, use_4bit=USE_4BIT)
@@ -136,7 +154,6 @@ def main():
     y_true = predictions_df['true_label']
     y_pred = predictions_df['prediction']
     acc = (y_true == y_pred).mean()
-
     print("\n" + "=" * 70)
     print(" RISULTATI ESPERIMENTO - RAG con LLM ".center(70, "="))
     print("=" * 70)
@@ -146,7 +163,6 @@ def main():
     print(pd.DataFrame(cm, index=['goodware', 'malware'], columns=['pred_goodware', 'pred_malware']))
     print("\nCLASSIFICATION REPORT:")
     print(classification_report(y_true, y_pred, target_names=['goodware', 'malware'], zero_division=0))
-    
     print("=" * 70)
     print(f"\n✅ CSV salvato in {output_csv}")
 
