@@ -1,6 +1,7 @@
 import torch
 import pandas as pd
 import numpy as np
+import re
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from typing import List, Optional
 import logging
@@ -12,7 +13,12 @@ logging.getLogger("transformers").setLevel(logging.ERROR)
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 class LLMPredictor:
-    def __init__(self, max_tokens: int = MAX_TOKENS, model_type: str = None, debug: bool = False):
+    def __init__(self, max_tokens: int = MAX_TOKENS, model_type: str = None, debug: bool = False,
+                 use_logits: bool = True):
+        """
+            use_logits: True = confronto logit (stabile, veloce, adatto a modelli piccoli),
+            False = generazione di testo libero (meglio per LLM grandi).
+        """
         self.model = None
         self.tokenizer = None
         self.device = None
@@ -21,6 +27,7 @@ class LLMPredictor:
         self.use_4bit = USE_4BIT
         self.debug = debug
         self.model_name = LLM_MODEL_NAME
+        self.use_logits = use_logits
 
     def load(self, model_name: Optional[str] = None, device: Optional[str] = None, use_4bit: Optional[bool] = None):
         if model_name is None:
@@ -32,7 +39,7 @@ class LLMPredictor:
         if use_4bit is not None:
             self.use_4bit = use_4bit
 
-        print(f"   Caricamento {model_name} su {self.device} (tipo: {self.model_type})...")
+        print(f"   Loading {model_name} on {self.device} (type: {self.model_type})...")
         
         quant_config = None
         if self.use_4bit and self.device == "cuda":
@@ -42,24 +49,24 @@ class LLMPredictor:
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4"
             )
-            print("   → Utilizzo caricamento in 4-bit")
+            print("   → Using 4-bit loading on GPU")
+        else:
+            print("   → Loading in FP32 on CPU (4-bit not supported)")
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         self.tokenizer.truncation_side = "right"
-        
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
 
+        torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            torch_dtype=torch_dtype,
             device_map="auto" if self.device == "cuda" else None,
             quantization_config=quant_config,
-            trust_remote_code=True
+            trust_remote_code=True,
+            low_cpu_mem_usage=True
         )
         if self.device != "cuda":
             self.model.to(self.device)
@@ -78,20 +85,22 @@ class LLMPredictor:
             "Below are similar examples that can be labeled as malware or goodware:\n"
         )
         
-        max_examples = min(3, len(retrieved_texts))
-        examples_str = ""
-        for i in range(max_examples):
-            text = self.truncate_text(retrieved_texts[i], 200)
-            label = "malware" if retrieved_labels[i] == 1 else "goodware"
-            examples_str += f"{i+1}. {text}\n   Class: {label}\n\n"
+        good_examples = [(t, l) for t, l in zip(retrieved_texts, retrieved_labels) if l == 0][:3]
+        mal_examples  = [(t, l) for t, l in zip(retrieved_texts, retrieved_labels) if l == 1][:3]
         
-        query_trunc = self.truncate_text(query_text, 300)
+        examples_str = "Examples:\n"
+        for i, (text, label) in enumerate(good_examples + mal_examples, 1):
+            label_str = "goodware" if label == 0 else "malware"
+            short_text = self.truncate_text(text, 300)  # truncate each example to 300 tokens
+            examples_str += f"{i}. {short_text}\n   Class: {label_str}\n\n"
+        
+        query_trunc = self.truncate_text(query_text, 400)
         
         user_content = (
             f"{examples_str}"
-            "Based on these examples, classify the following file as either malware or goodware.\n"
-            "Answer with a single word: malware or goodware.\n\n"
-            f"File features:\n{query_trunc}\n\nAnswer:"
+            "Now classify the following file:\n"
+            f"{query_trunc}\n\n"
+            "Answer (single word, malware or goodware):"
         )
         
         if self.model_type == "chat":
@@ -103,69 +112,111 @@ class LLMPredictor:
         else:
             prompt = system_prompt + user_content
         
-        total_tokens = len(self.tokenizer.encode(prompt))
-        return prompt, total_tokens
+        return prompt
+
+    def _get_token_ids_for_words(self, words: List[str]) -> List[int]:
+        """Returns token IDs for given words (tries with leading space for BPE)."""
+        ids = []
+        for w in words:
+            tokenized = self.tokenizer.encode(f" {w}", add_special_tokens=False)
+            if not tokenized:
+                tokenized = self.tokenizer.encode(w, add_special_tokens=False)
+            if tokenized:
+                ids.append(tokenized[0])
+        return ids
 
     def predict(self, test_texts: List[str], true_labels_num: List[int],
                 vector_index, embedding_model, k: int, output_csv: str) -> pd.DataFrame:
         if self.model is None:
-            raise ValueError("Chiamare load() prima di predict().")
+            raise ValueError("Call load() before predict().")
         
         results = []
         token_counts = []
         total = len(test_texts)
-        print(f"   Predizioni su {total} campioni (k={k})")
+        print(f"   Predicting on {total} samples (k={k})")
         
-        for idx, (query, true_label_num) in enumerate(tqdm(zip(test_texts, true_labels_num), total=total, desc="   Progresso", unit="campione", ncols=80)):
+        # Precompute token IDs for 'malware' and 'goodware'
+        malware_ids = self._get_token_ids_for_words(["malware", "malware"])
+        goodware_ids = self._get_token_ids_for_words(["goodware", "goodware"])
+        if not malware_ids or not goodware_ids:
+            print("   Warning: 'malware'/'goodware' tokens not found. Falling back to generation mode.")
+            self.use_logits = False
+        
+        for idx, (query, true_label_num) in enumerate(tqdm(zip(test_texts, true_labels_num), total=total, desc="   Progress", unit="sample", ncols=80)):
+            # Retrieve balanced neighbors (max 3 per class)
             q_emb = embedding_model.encode([query])[0]
-            _, indices = vector_index.search(q_emb, k=k)
+            distances, indices = vector_index.search(q_emb, k=k*2)
             ret_texts, ret_targets = vector_index.get_metadata_by_indices(indices)
             
-            prompt, total_tokens_prompt = self.build_prompt(ret_texts, ret_targets, query)
+            good_indices = [i for i, lbl in enumerate(ret_targets) if lbl == 0]
+            mal_indices   = [i for i, lbl in enumerate(ret_targets) if lbl == 1]
+            selected_idx = []
+            selected_idx.extend(good_indices[:3])
+            selected_idx.extend(mal_indices[:3])
+            
+            if len(selected_idx) < k:
+                remaining = [i for i in range(len(ret_targets)) if i not in selected_idx]
+                needed = k - len(selected_idx)
+                selected_idx.extend(remaining[:needed])
+            selected_idx = selected_idx[:k]
+            
+            ret_texts = [ret_texts[i] for i in selected_idx]
+            ret_targets = [ret_targets[i] for i in selected_idx]
+            
+            # Build prompt
+            prompt = self.build_prompt(ret_texts, ret_targets, query)
+            total_tokens_prompt = len(self.tokenizer.encode(prompt))
             token_counts.append(total_tokens_prompt)
             
-            if total_tokens_prompt > self.max_tokens:
-                inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=self.max_tokens).to(self.device)
-            else:
-                inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=self.max_tokens).to(self.device)
             
-            with torch.no_grad():
-                out = self.model.generate(
-                    **inputs,
-                    max_new_tokens=20,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    do_sample=False,
-                    temperature=0.0,
-                    eos_token_id=self.tokenizer.eos_token_id
-                )
-            
-            generated = self.tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
-            if not generated:
-                generated = ""
-            
-            if self.debug:
-                print(f"\n[DEBUG] Sample {idx}: generated = '{generated}'")
-            
-            # Migliorato: cerca le parole "malware" o "goodware" in tutta la risposta
-            generated_lower = generated.lower()
-            if "malware" in generated_lower:
-                pred_str = "malware"
+            if self.use_logits and malware_ids and goodware_ids:
+                # Logits mode: compare the logits of the first generated token
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    logits = outputs.logits[0, -1, :]
+                
+                malware_logit = logits[malware_ids[0]].item()
+                goodware_logit = logits[goodware_ids[0]].item()
+                
+                if malware_logit > goodware_logit:
+                    pred_str = "malware"
+                else:
+                    pred_str = "goodware"
                 pred_type = "llm"
-            elif "goodware" in generated_lower:
-                pred_str = "goodware"
-                pred_type = "llm"
-            else:
-                # fallback a majority voting
-                ret_labels_arr = np.array(ret_targets)
-                counts = np.bincount(ret_labels_arr)
-                pred_num = int(np.argmax(counts))
-                pred_str = "malware" if pred_num == 1 else "goodware"
-                pred_type = "mv"
+                
                 if self.debug:
-                    print(f"[DEBUG] Fallback to MV, generated='{generated}'")
+                    print(f"\n[DEBUG] Sample {idx}: malware_logit={malware_logit:.4f}, goodware_logit={goodware_logit:.4f} -> {pred_str}")
+            else:
+                with torch.no_grad():
+                    out = self.model.generate(
+                        **inputs,
+                        max_new_tokens=20,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        do_sample=False,   # deterministic
+                        eos_token_id=self.tokenizer.eos_token_id
+                    )
+                generated = self.tokenizer.decode(out[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True).strip()
+                if self.debug:
+                    print(f"\n[DEBUG] Sample {idx}: generated = '{generated}'")
+                
+                match = re.search(r'\b(malware|goodware)\b', generated.lower())
+                if match:
+                    pred_str = match.group(1)
+                    pred_type = "llm"
+                else:
+                    ret_labels_arr = np.array(ret_targets)
+                    if len(ret_labels_arr) == 0:
+                        pred_num = 1
+                    else:
+                        counts = np.bincount(ret_labels_arr.astype(int))
+                        pred_num = int(np.argmax(counts))
+                    pred_str = "malware" if pred_num == 1 else "goodware"
+                    pred_type = "mv"
+                    if self.debug:
+                        print(f"[DEBUG] Fallback to MV, generated='{generated}'")
             
             true_label_str = "malware" if true_label_num == 1 else "goodware"
-            
             results.append({
                 'prediction': pred_str,
                 'true_label': true_label_str,
@@ -176,10 +227,10 @@ class LLMPredictor:
         df.to_csv(output_csv, index=False)
         
         acc = (df['prediction'] == df['true_label']).mean()
-        llm_percent = (df['pred_type'] == 'llm').mean() * 100
-        print(f"   Accuratezza: {acc*100:.2f}% - CSV salvato in {output_csv}")
-        print(f"   Predizioni LLM: {llm_percent:.1f}% dei casi")
+        llm_percent = (df['pred_type'].str.contains('llm')).mean() * 100
+        print(f"   Accuracy: {acc*100:.2f}% - CSV saved to {output_csv}")
+        print(f"   LLM predictions: {llm_percent:.1f}% of cases")
         if token_counts:
-            print(f"   Token medi nel prompt: {np.mean(token_counts):.1f} (max {np.max(token_counts)})")
+            print(f"   Average prompt tokens: {np.mean(token_counts):.1f} (max {np.max(token_counts)})")
         
         return df

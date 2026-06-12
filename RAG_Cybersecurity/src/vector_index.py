@@ -15,10 +15,10 @@ class VectorIndex:
         self._index_type = None
 
     def build_from_texts(self, text_dataset: TextDataset, emb_model: Embedding,
-                         metric: str = "L2", batch_size: int = 64):
+                         metric: str = "IP", batch_size: int = 64):
         """
-        Costruisce l'indice FAISS direttamente dai testi, processando a lotti.
-        Usa la metrica L2 (distanza euclidea).
+        Costruisce l'indice FAISS direttamente dai testi.
+        Ora usa di default IP (prodotto scalare) con vettori normalizzati.
         """
         texts = text_dataset.get_texts()
         targets = text_dataset.get_targets().tolist()
@@ -49,7 +49,7 @@ class VectorIndex:
         self._metadata['num_vectors'] = len(texts)
         self._metadata['index_type'] = self._index_type
 
-    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "L2"):
+    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "IP"):
         embeddings = embedding_dataset.get_embedding()
         self._dimension = embeddings.shape[1]
         self._index_type = metric

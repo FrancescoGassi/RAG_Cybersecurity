@@ -24,7 +24,7 @@ class Embedding:
                 batch,
                 convert_to_numpy=True,
                 show_progress_bar=False,
-                normalize_embeddings=False   # L2 non richiede normalizzazione
+                normalize_embeddings=True   # <-- CORREZIONE: normalizza per similarità coseno
             )
             embeddings.append(batch_embs)
         return np.vstack(embeddings)
