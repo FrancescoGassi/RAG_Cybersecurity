@@ -1,170 +1,149 @@
-import sys
-import os
-import logging
-import pandas as pd
-import numpy as np
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from __future__ import annotations
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hashlib
+import json
+import os
+from pathlib import Path
+
+import pandas as pd
+from sklearn.metrics import classification_report, confusion_matrix
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+os.chdir(PROJECT_ROOT)
 
 from src.config import (
-    MAX_TOKENS, K_NEIGHBORS, MODEL_TYPE,
-    DEBUG_LLM, SAMPLE_SIZE, TEST_LIMIT,
-    LLM_MODEL_NAME, USE_4BIT
+    BALANCE_TEST,
+    BALANCE_TRAINING,
+    CACHE_DIR,
+    CACHE_VERSION,
+    FORCE_REBUILD_INDEX,
+    K_NEIGHBORS,
+    LLM_MODEL_NAME,
+    OUTPUT_CSV,
+    RANDOM_SEED,
+    TEST_CSV,
+    TEST_LIMIT,
+    TOP_K_FEATURES,
+    TRAIN_CSV,
+    TRAIN_SAMPLE_SIZE,
 )
-
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-for lib in ["huggingface_hub", "httpx", "sentence_transformers", "transformers", "urllib3", "faiss", "torch", "filelock", "datasets"]:
-    logging.getLogger(lib).setLevel(logging.ERROR)
-
 from src.dataset import Dataset
-from src.text_dataset import TextDataset
-from src.embedding import Embedding
-from src.vector_index import VectorIndex
+from src.faiss_rag_index import FaissRAGIndex
 from src.llm_predictor import LLMPredictor
 
-CACHE_DIR = "cache"
-os.makedirs(CACHE_DIR, exist_ok=True)
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
-def print_step(step_text):
-    print(f"\n{step_text}...")
+def file_signature(path: str) -> dict[str, object]:
+    stat = Path(path).stat()
+    return {"path": str(Path(path).resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
 
-def print_experiment_params():
-    print("\n" + "=" * 70)
-    print(" PARAMETRI ESPERIMENTO - RAG con LLM ".center(70))
-    print("=" * 70)
-    print(f"  Modello LLM            : {LLM_MODEL_NAME}")
-    print(f"  Campioni training      : {SAMPLE_SIZE if SAMPLE_SIZE else 'TUTTI'}")
-    print(f"  Campioni test          : {TEST_LIMIT if TEST_LIMIT else 'TUTTI'}")
-    print(f"  Numero vicini (k)      : {K_NEIGHBORS}")
-    print(f"  Token massimi prompt   : {MAX_TOKENS}")
-    print("=" * 70)
+def cache_signature(features: list[str], train: Dataset) -> str:
+    payload = {
+        "version": CACHE_VERSION,
+        "train_file": file_signature(TRAIN_CSV),
+        "rows": len(train),
+        "classes": train.class_counts(),
+        "features": features,
+        "seed": RANDOM_SEED,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
-def main():
-    print_experiment_params()
-    print("\n=== RAG con LLM (con fallback a Majority Voting) ===")
+def print_header() -> None:
+    print("=" * 80)
+    print(" RAG + FAISS + LLM GENERATE + FALLBACK MAJORITY VOTING ".center(80))
+    print("=" * 80)
+    print(f"LLM:                 {LLM_MODEL_NAME}")
+    print(f"Training limit:      {TRAIN_SAMPLE_SIZE}")
+    print(f"Test limit:          {TEST_LIMIT}")
+    print(f"Top MI features:     {TOP_K_FEATURES}")
+    print(f"Vicini FAISS (k):    {K_NEIGHBORS}")
+    print("LLM logits:          NON UTILIZZATI")
+    print("Fallback:            Majority Voting puro")
+    print(f"Output CSV:          {OUTPUT_CSV}")
+    print("=" * 80)
 
-    # 1. Caricamento dati
-    print_step("1. Caricamento dataset")
-    train_ds = Dataset('DatasetPE/BODMAS_features_named.csv')
-    test_ds  = Dataset('DatasetPE/test_named.csv')
-    
-    print("\n--- Distribuzione classi (TRAINING) ---")
-    train_counts = train_ds.target_data.value_counts()
-    print(train_counts)
-    unique_train = train_ds.target_data.unique()
-    print(f"Valori unici nel target del training: {unique_train}")
-    if len(unique_train) < 2:
-        print("⚠️ ATTENZIONE: Il training set contiene una sola classe!")
-        return
-    
-    print("\n--- Distribuzione classi (TEST) ---")
-    test_counts = test_ds.target_data.value_counts()
-    print(test_counts)
-    
-    print(f"   Training originale: {len(train_ds)} esempi, {len(train_ds.feature_names)} feature")
-    print(f"   Test originale:     {len(test_ds)} esempi, {len(test_ds.feature_names)} feature")
+def main() -> None:
+    if K_NEIGHBORS <= 0 or K_NEIGHBORS % 2 == 0:
+        raise ValueError("K_NEIGHBORS deve essere dispari e maggiore di zero.")
 
-    if SAMPLE_SIZE and len(train_ds) > SAMPLE_SIZE:
-        # Stratify per mantenere la proporzione delle classi
-        _, sampled_idx = train_test_split(
-            np.arange(len(train_ds.target_data)),
-            test_size=SAMPLE_SIZE,
-            stratify=train_ds.target_data,
-            random_state=42
-        )
-        train_ds.feat_data = train_ds.feat_data.iloc[sampled_idx]
-        train_ds.target_data = train_ds.target_data.iloc[sampled_idx]
-        print(f"   → Training ridotto a {SAMPLE_SIZE} esempi (bilanciato: {train_ds.target_data.value_counts().to_dict()})")
+    print_header()
+    print("\n1. Caricamento dataset...")
+    full_train = Dataset.from_csv(TRAIN_CSV)
+    full_test = Dataset.from_csv(TEST_CSV)
+    print(f"   Training: {len(full_train)}, classi={full_train.class_counts()}")
+    print(f"   Test:     {len(full_test)}, classi={full_test.class_counts()}")
 
-    # 2. Mutual Information (usa SOLO i dati del training ridotto, senza ulteriore campionamento)
-    print_step("2. Calcolo Mutual Information (sul training ridotto)")
-    print("   Calcolo MI in corso...", end=' ', flush=True)
-    mi = train_ds.compute_mutual_information(sample_size=None)   # <-- CORRETTO: usa tutto il training ridotto
-    print("completato.")
-    top5 = list(mi.keys())[:5]
-    print(f"   Top-5 feature: {', '.join(top5)}")
+    train = full_train.stratified_sample(TRAIN_SAMPLE_SIZE, random_state=RANDOM_SEED, balanced=BALANCE_TRAINING)
+    test = full_test.stratified_sample(TEST_LIMIT, random_state=RANDOM_SEED, balanced=BALANCE_TEST)
 
-    # 3. Ordinamento feature
-    print_step("3. Ordinamento delle feature per MI")
-    train_sorted = train_ds.sort_features_by_mi(mi, top_k=None)
-    test_sorted  = test_ds.sort_features_by_mi(mi, top_k=None)
+    print(f"   Training usato: {len(train)}, classi={train.class_counts()}")
+    print(f"   Test usato:     {len(test)}, classi={test.class_counts()}")
 
-    # Conversione in testo - cache
-    train_pkl = os.path.join(CACHE_DIR, 'train_texts.pkl')
-    test_pkl = os.path.join(CACHE_DIR, 'test_texts.pkl')
-    if not os.path.exists(train_pkl):
-        train_sorted.save(train_pkl)
-    if not os.path.exists(test_pkl):
-        test_sorted.save(test_pkl)
-    train_text = TextDataset(train_pkl)
-    test_text = TextDataset(test_pkl)
-    print("   Testi salvati/ricaricati in cache/")
+    print("\n2. Selezione feature con Mutual Information...")
+    mi_scores = train.compute_mutual_information(random_state=RANDOM_SEED)
+    selected_features = list(mi_scores)[:TOP_K_FEATURES]
+    for rank, feature in enumerate(selected_features[:10], start=1):
+        print(f"   {rank:2d}. {feature}: {mi_scores[feature]:.6f}")
 
-    # Limitazione test set (stratificata)
-    if TEST_LIMIT is not None:
-        targets = test_text.get_targets().tolist()
-        indices = np.arange(len(targets))
-        if len(np.unique(targets)) == 2 and min(pd.Series(targets).value_counts()) >= TEST_LIMIT // 2:
-            _, sampled_idx = train_test_split(indices, test_size=TEST_LIMIT, stratify=targets, random_state=42)
-        else:
-            sampled_idx = indices[:TEST_LIMIT]
-        test_texts = [test_text.get_texts()[i] for i in sampled_idx]
-        true_labels_num = [targets[i] for i in sampled_idx]
-        print(f"   → Test limitato a {len(test_texts)} campioni (bilanciati: {pd.Series(true_labels_num).value_counts().to_dict()})")
-    else:
-        test_texts = test_text.get_texts()
-        true_labels_num = test_text.get_targets().tolist()
-        print(f"   → Test completo ({len(test_texts)} campioni)")
+    train_selected = train.select_features(selected_features)
+    test_selected = test.select_features(selected_features)
 
-    # 4. Embedding e indice FAISS
-    print_step("4. Generazione embedding e indice FAISS (metrica IP)")
-    emb_model = Embedding()
-    index_prefix = os.path.join(CACHE_DIR, "faiss_index")
-    if not os.path.exists(index_prefix + ".faiss"):
-        print("   Costruzione indice incrementale da testi...")
-        index = VectorIndex()
-        index.build_from_texts(train_text, emb_model, metric="IP", batch_size=64)
+    print("\n3. Costruzione/caricamento indice FAISS numerico...")
+    cache_dir = Path(CACHE_DIR)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    index_prefix = cache_dir / "bodmas_rag_mv"
+    expected_signature = cache_signature(selected_features, train_selected)
+
+    index = FaissRAGIndex()
+    cache_valid = False
+    if not FORCE_REBUILD_INDEX and FaissRAGIndex.exists(index_prefix):
+        index.load(index_prefix)
+        cache_valid = index.cache_signature == expected_signature
+        if not cache_valid:
+            print("   Cache obsoleta o incompatibile: verrà ricostruita.")
+
+    if FORCE_REBUILD_INDEX or not cache_valid:
+        index.fit(train_selected.feat_data, train_selected.target_data.to_numpy(), selected_features, cache_signature=expected_signature)
         index.save(index_prefix)
-    index_loaded = VectorIndex()
-    index_loaded.load(index_prefix)
-    print(f"   Indice FAISS caricato (dimensione {index_loaded._dimension}, metrica {index_loaded.get_index_type()})")
+        print("   Indice FAISS creato e salvato.")
+    else:
+        print("   Indice FAISS valido caricato dalla cache.")
 
-    # 5. Caricamento LLM (solo se il modello è stato cambiato in uno più potente)
-    print_step(f"5. Caricamento modello LLM: {LLM_MODEL_NAME}")
-    llm = LLMPredictor(max_tokens=MAX_TOKENS, model_type=MODEL_TYPE, debug=DEBUG_LLM)
-    llm.load(model_name=LLM_MODEL_NAME, use_4bit=USE_4BIT)
+    print("\n4. Caricamento LLM...")
+    predictor = LLMPredictor()
+    predictor.load()
 
-    # 6. Valutazione RAG
-    print_step(f"6. Valutazione RAG (k={K_NEIGHBORS})")
-    output_csv = "rag_predictions.csv"
-    predictions_df = llm.predict(
-        test_texts=test_texts,
-        true_labels_num=true_labels_num,
-        vector_index=index_loaded,
-        embedding_model=emb_model,
-        k=K_NEIGHBORS,
-        output_csv=output_csv
-    )
+    print("\n5. Predizione RAG...")
+    result = predictor.predict(test_selected.feat_data, test_selected.target_data.astype(int).tolist(), index, OUTPUT_CSV)
 
-    # Report finale
-    y_true = predictions_df['true_label']
-    y_pred = predictions_df['prediction']
-    acc = (y_true == y_pred).mean()
-    print("\n" + "=" * 70)
-    print(" RISULTATI ESPERIMENTO - RAG con LLM ".center(70, "="))
-    print("=" * 70)
-    print(f"\nACCURATEZZA: {acc*100:.2f}%")
-    print("\nMATRICE DI CONFUSIONE:")
-    cm = confusion_matrix(y_true, y_pred, labels=['goodware', 'malware'])
-    print(pd.DataFrame(cm, index=['goodware', 'malware'], columns=['pred_goodware', 'pred_malware']))
-    print("\nCLASSIFICATION REPORT:")
-    print(classification_report(y_true, y_pred, target_names=['goodware', 'malware'], zero_division=0))
-    print("=" * 70)
-    print(f"\n✅ CSV salvato in {output_csv}")
+    y_true = result["true_label_num"].astype(int)
+    y_pred = result["prediction_num"].astype(int)
+    accuracy = float((y_true == y_pred).mean())
+
+    print("\n" + "=" * 80)
+    print(f"ACCURACY: {accuracy * 100:.2f}%")
+    print("\nDistribuzione predizioni finali:")
+    print(result["prediction"].value_counts().to_string())
+    print("\nOrigine decisioni:")
+    print(result["pred_type"].value_counts().to_string())
+    print("\nDettaglio sorgenti interne:")
+    print(result["decision_source"].value_counts().to_string())
+
+    matrix = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    print("\nMatrice di confusione:")
+    print(pd.DataFrame(matrix, index=["true_goodware", "true_malware"], columns=["pred_goodware", "pred_malware"]).to_string())
+    print("\nClassification report:")
+    print(classification_report(y_true, y_pred, labels=[0, 1], target_names=["goodware", "malware"], zero_division=0))
+
+    if result["prediction_num"].nunique() == 1:
+        print("ATTENZIONE: le predizioni finali contengono una sola classe.")
+    else:
+        print("Controllo anti-collasso superato: entrambe le classi sono presenti.")
+
+    print(f"\nCSV salvato in: {OUTPUT_CSV}")
+    print("Colonne CSV: prediction,true_label,pred_type")
+    print("=" * 80)
 
 if __name__ == "__main__":
     main()

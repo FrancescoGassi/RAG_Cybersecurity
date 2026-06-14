@@ -3,7 +3,6 @@ import os
 import logging
 import pandas as pd
 
-# Aggiunge la directory padre al path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
