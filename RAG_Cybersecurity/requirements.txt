@@ -1,11 +1,21 @@
+# Core data science
 pandas==2.2.3
 numpy==2.2.4
 scikit-learn==1.7.0
-matplotlib==3.10.1
-seaborn==0.13.2
+
+# FAISS per similarità vettoriale (CPU)
 faiss-cpu==1.10.0
-sentence-transformers==3.4.1
+
+# Deep learning e LLM
 torch==2.7.0
 transformers==4.57.6
 accelerate==1.5.2
+
+# Utilità
 tqdm==4.67.1
+
+bitsandbytes==0.45.0   # decommenta se hai CUDA e vuoi USE_4BIT=True
+
+sentence-transformers==3.4.1
+matplotlib==3.10.1
+seaborn==0.13.2
