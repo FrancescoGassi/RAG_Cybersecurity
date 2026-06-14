@@ -15,15 +15,14 @@ class VectorIndex:
         self._index_type = None
 
     def build_from_texts(self, text_dataset: TextDataset, emb_model: Embedding,
-                         metric: str = "IP", batch_size: int = 64):
-        """
-        Costruisce l'indice FAISS direttamente dai testi.
-        Ora usa di default IP (prodotto scalare) con vettori normalizzati.
-        """
+                         metric: str = "L2", batch_size: int = 64, original_indices: List[int] = None):
         texts = text_dataset.get_texts()
         targets = text_dataset.get_targets().tolist()
         if len(texts) == 0:
             raise ValueError("Nessun testo nel dataset")
+
+        if original_indices is None:
+            original_indices = list(range(len(texts)))
 
         first_batch = texts[:batch_size]
         first_embs = emb_model.encode(first_batch, batch_size=batch_size)
@@ -46,10 +45,12 @@ class VectorIndex:
 
         self._metadata['targets'] = targets
         self._metadata['texts'] = texts
+        self._metadata['original_indices'] = original_indices
         self._metadata['num_vectors'] = len(texts)
         self._metadata['index_type'] = self._index_type
 
-    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "IP"):
+    def build(self, embedding_dataset: EmbeddingDataset, texts: List[str], metric: str = "L2",
+              original_indices: List[int] = None):
         embeddings = embedding_dataset.get_embedding()
         self._dimension = embeddings.shape[1]
         self._index_type = metric
@@ -62,6 +63,9 @@ class VectorIndex:
         self._index.add(embeddings.astype(np.float32))
         self._metadata['targets'] = embedding_dataset.get_target().tolist()
         self._metadata['texts'] = texts
+        if original_indices is None:
+            original_indices = list(range(len(texts)))
+        self._metadata['original_indices'] = original_indices
         self._metadata['num_vectors'] = len(embeddings)
         self._metadata['index_type'] = self._index_type
 
@@ -89,14 +93,15 @@ class VectorIndex:
         distances, indices = self._index.search(query_embedding.astype(np.float32), k)
         return distances[0], indices[0]
 
-    def get_metadata_by_indices(self, indices: Union[List[int], np.ndarray]) -> Tuple[List[str], List[int]]:
+    def get_metadata_by_indices(self, indices: Union[List[int], np.ndarray]) -> Tuple[List[str], List[int], List[int]]:
         if indices is None:
             raise ValueError("Indices cannot be None")
         if isinstance(indices, np.ndarray):
             indices = indices.tolist()
         texts = [self._metadata['texts'][i] for i in indices]
         targets = [self._metadata['targets'][i] for i in indices]
-        return texts, targets
+        orig_indices = [self._metadata['original_indices'][i] for i in indices]
+        return texts, targets, orig_indices
 
     def get_index_type(self) -> str:
         return self._index_type

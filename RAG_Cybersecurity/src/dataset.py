@@ -1,102 +1,130 @@
-import pandas as pd
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable, Optional
+
 import numpy as np
-import pickle
+import pandas as pd
 from sklearn.feature_selection import mutual_info_classif
-from sklearn.model_selection import train_test_split
-from typing import List, Tuple, Dict, Optional
-import logging
 
-from src.text_dataset import TextDataset
+_LABEL_MAP = {
+    "0": 0, "goodware": 0, "benign": 0, "safe": 0, "clean": 0, "false": 0,
+    "1": 1, "malware": 1, "malicious": 1, "threat": 1, "true": 1,
+}
 
-logging.getLogger(__name__).setLevel(logging.ERROR)
+def normalise_binary_labels(values: pd.Series) -> pd.Series:
+    if values.isna().any():
+        raise ValueError("La colonna target contiene valori mancanti.")
 
+    if pd.api.types.is_numeric_dtype(values):
+        numeric = pd.to_numeric(values, errors="raise")
+        unique = set(pd.unique(numeric).tolist())
+        if not unique.issubset({0, 1, 0.0, 1.0}):
+            raise ValueError(f"Target numerico non binario: {sorted(unique)[:10]}")
+        return numeric.astype(np.int64)
+
+    mapped = values.astype(str).str.strip().str.lower().map(_LABEL_MAP)
+    if mapped.isna().any():
+        invalid = values[mapped.isna()].astype(str).unique().tolist()[:10]
+        raise ValueError(f"Etichette non riconosciute: {invalid}")
+    return mapped.astype(np.int64)
+
+@dataclass
 class Dataset:
-    def __init__(self, file_path: str):
-        self.feat_data = None
-        self.target_data = None
-        self.feature_names = None
-        self.target_name = None
+    feat_data: pd.DataFrame
+    target_data: pd.Series
+    target_name: str
 
+    @classmethod
+    def from_csv(cls, file_path: str, target_column: Optional[str] = None) -> "Dataset":
         df = pd.read_csv(file_path)
-        self.target_name = df.columns[-1]
-        self.target_data = df[self.target_name].copy()
-        self.feat_data = df.drop(columns=[self.target_name])
-        self.feature_names = list(self.feat_data.columns)
+        if df.empty:
+            raise ValueError(f"Il dataset {file_path!r} è vuoto.")
 
-    def compute_mutual_information(self, sample_size: Optional[int] = None) -> Dict[str, float]:
-        if self.feat_data is None:
-            raise ValueError("Dataset non caricato.")
-        
-        # Se richiesto, usa un sottocampione per il calcolo della MI
-        if sample_size is not None and len(self.feat_data) > sample_size:
-            sampled_idx = self.feat_data.sample(n=sample_size, random_state=42).index
-            X = self.feat_data.loc[sampled_idx].astype(np.float32)
-            y = self.target_data.loc[sampled_idx]
-        else:
-            X = self.feat_data.astype(np.float32)
-            y = self.target_data
+        target_name = target_column or str(df.columns[-1])
+        if target_name not in df.columns:
+            raise ValueError(f"Colonna target {target_name!r} non trovata.")
 
-        mi = mutual_info_classif(X, y, random_state=42, n_jobs=-1)
-        mi_dict = dict(zip(self.feature_names, mi))
-        return dict(sorted(mi_dict.items(), key=lambda x: x[1], reverse=True))
+        y = normalise_binary_labels(df[target_name]).reset_index(drop=True)
+        X = df.drop(columns=[target_name]).copy()
+        if X.shape[1] == 0:
+            raise ValueError("Il dataset non contiene feature.")
 
-    def sort_features_by_mi(self, mi_dict: Dict[str, float], top_k: Optional[int] = None) -> 'Dataset':
-        if self.feat_data is None:
-            raise ValueError("Dataset non caricato.")
-        sorted_features = list(mi_dict.keys())
-        if top_k is not None and top_k > 0:
-            sorted_features = sorted_features[:top_k]
-        new_dataset = Dataset.__new__(Dataset)
-        new_dataset.target_name = self.target_name
-        new_dataset.feature_names = sorted_features
-        new_dataset.feat_data = self.feat_data[sorted_features].copy()
-        new_dataset.target_data = self.target_data.copy()
-        return new_dataset
+        X.columns = X.columns.astype(str)
+        X = X.apply(pd.to_numeric, errors="coerce")
+        X = X.replace([np.inf, -np.inf], np.nan).reset_index(drop=True)
+        return cls(X, y, target_name)
 
-    def train_test_split(self, test_size: float = 0.2, random_state: int = 42) -> Tuple['Dataset', 'Dataset']:
-        X_train, X_test, y_train, y_test = train_test_split(
-            self.feat_data, self.target_data,
-            test_size=test_size, random_state=random_state, stratify=self.target_data
-        )
-        train_ds = Dataset.__new__(Dataset)
-        train_ds.target_name = self.target_name
-        train_ds.feature_names = self.feature_names
-        train_ds.feat_data = X_train
-        train_ds.target_data = y_train
-        test_ds = Dataset.__new__(Dataset)
-        test_ds.target_name = self.target_name
-        test_ds.feature_names = self.feature_names
-        test_ds.feat_data = X_test
-        test_ds.target_data = y_test
-        return train_ds, test_ds
-
-    def _row_to_text(self, row_index: int, separator: str = ": ") -> str:
-        if row_index < 0 or row_index >= len(self.feat_data):
-            raise ValueError(f"Indice {row_index} non valido.")
-        row = self.feat_data.iloc[row_index]
-        parts = []
-        for feat in self.feature_names:
-            value = row[feat]
-            if isinstance(value, float):
-                if value == int(value):
-                    value_str = str(int(value))
-                else:
-                    value_str = f"{value:.2f}"
-            elif isinstance(value, (int, np.integer)):
-                value_str = str(int(value))
-            else:
-                value_str = str(value)
-            parts.append(f"{feat}{separator}{value_str}")
-        return ", ".join(parts)
-
-    def save(self, path: str):
-        texts = [self._row_to_text(i) for i in range(len(self))]
-        with open(path, 'wb') as f:
-            pickle.dump((texts, self.target_data), f)
-
-    def text_to_dataset(self) -> TextDataset:
-        texts = [self._row_to_text(i) for i in range(len(self))]
-        return TextDataset.from_data(texts, self.target_data)
+    @property
+    def feature_names(self) -> list[str]:
+        return self.feat_data.columns.tolist()
 
     def __len__(self) -> int:
-        return len(self.feat_data) if self.feat_data is not None else 0
+        return len(self.target_data)
+
+    def class_counts(self) -> dict[int, int]:
+        counts = self.target_data.value_counts().sort_index()
+        return {int(label): int(count) for label, count in counts.items()}
+
+    def subset(self, indices: Iterable[int]) -> "Dataset":
+        idx = np.asarray(list(indices), dtype=np.int64)
+        return Dataset(
+            feat_data=self.feat_data.iloc[idx].reset_index(drop=True),
+            target_data=self.target_data.iloc[idx].reset_index(drop=True),
+            target_name=self.target_name,
+        )
+
+    def stratified_sample(self, limit: Optional[int], random_state: int = 42, balanced: bool = False) -> "Dataset":
+        if self.target_data.nunique() != 2:
+            raise ValueError(f"Sono necessarie entrambe le classi; distribuzione: {self.class_counts()}")
+        if limit is None or limit >= len(self):
+            if not balanced:
+                return self.subset(range(len(self)))
+            limit = len(self)
+        if limit < 2:
+            raise ValueError("Il campione deve contenere almeno due righe.")
+
+        rng = np.random.default_rng(random_state)
+        class_indices = {label: np.flatnonzero(self.target_data.to_numpy() == label) for label in (0, 1)}
+
+        if balanced:
+            per_class = min(limit // 2, len(class_indices[0]), len(class_indices[1]))
+            if per_class == 0:
+                raise ValueError("Impossibile creare un campione bilanciato.")
+            selected: list[int] = []
+            for label in (0, 1):
+                selected.extend(rng.choice(class_indices[label], size=per_class, replace=False).tolist())
+            if limit % 2 == 1 and len(selected) < limit:
+                remaining = np.setdiff1d(np.arange(len(self)), np.asarray(selected))
+                if len(remaining):
+                    selected.append(int(rng.choice(remaining)))
+        else:
+            count0, count1 = len(class_indices[0]), len(class_indices[1])
+            n0 = int(round(limit * count0 / (count0 + count1)))
+            n0 = max(1, min(n0, count0, limit - 1))
+            n1 = max(1, min(limit - n0, count1))
+            selected = rng.choice(class_indices[0], size=n0, replace=False).tolist()
+            selected += rng.choice(class_indices[1], size=n1, replace=False).tolist()
+
+        rng.shuffle(selected)
+        return self.subset(selected)
+
+    def compute_mutual_information(self, random_state: int = 42) -> dict[str, float]:
+        if self.target_data.nunique() != 2:
+            raise ValueError("La Mutual Information richiede entrambe le classi.")
+        X = self.feat_data.copy()
+        medians = X.median(axis=0, skipna=True).fillna(0.0)
+        X = X.fillna(medians).astype(np.float32)
+        scores = mutual_info_classif(X, self.target_data.to_numpy(dtype=np.int64), random_state=random_state)
+        ordered = sorted(zip(self.feature_names, scores.tolist()), key=lambda item: item[1], reverse=True)
+        return {name: float(score) for name, score in ordered}
+
+    def select_features(self, feature_names: list[str]) -> "Dataset":
+        missing = [name for name in feature_names if name not in self.feat_data.columns]
+        if missing:
+            raise ValueError(f"Feature mancanti nel dataset: {missing[:10]}")
+        return Dataset(
+            feat_data=self.feat_data.loc[:, feature_names].copy(),
+            target_data=self.target_data.copy(),
+            target_name=self.target_name,
+        )

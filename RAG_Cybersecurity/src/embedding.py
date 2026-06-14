@@ -24,7 +24,7 @@ class Embedding:
                 batch,
                 convert_to_numpy=True,
                 show_progress_bar=False,
-                normalize_embeddings=True   # <-- CORREZIONE: normalizza per similarità coseno
+                normalize_embeddings=True
             )
             embeddings.append(batch_embs)
         return np.vstack(embeddings)
