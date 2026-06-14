@@ -1,13 +1,3 @@
-"""Classificazione RAG con LLM Instruct e Majority Voting.
-
-L'LLM partecipa alla decisione finale ogni volta che produce una risposta valida.
-La Majority Voting (MV) viene utilizzata solo se l'LLM non fornisce alcuna risposta valida
-oppure se esplicitamente disabilitato tramite configurazione.
-
-Mapping canonico delle classi:
-    0 = goodware
-    1 = malware
-"""
 from __future__ import annotations
 
 import importlib.util
@@ -45,8 +35,8 @@ CLASS_NAME = {
     1: "malware",
 }
 
-# Se True, l'LLM prevale sempre (quando valido). Se False, usa la vecchia logica restrittiva.
-LLM_ALWAYS_OVERRIDE = True   # Modificabile in config.py se preferisci
+# Se True, l'LLM prevale sempre (quando valido). Se False, usa la logica restrittiva.
+LLM_ALWAYS_OVERRIDE = False
 
 # Numero minimo di varianti LLM che devono concordare per poter sovrascrivere MV.
 # Con LLM_ALWAYS_OVERRIDE=False, si usa ancora MIN_VARIANTS_FOR_LLM_OVERRIDE.
@@ -724,10 +714,7 @@ class LLMPredictor:
 
         llm_candidate = int(llm_candidate)
 
-        # Nuova logica: LLM prevale sempre (se valido)
-        # Puoi disabilitare settando LLM_ALWAYS_OVERRIDE = False
         if LLM_ALWAYS_OVERRIDE:
-            # Se l'LLM ha dato un output valido, lo usiamo sempre
             return (
                 llm_candidate,
                 "LLM",
@@ -737,8 +724,6 @@ class LLMPredictor:
                 mv_margin,
             )
 
-        # Vecchia logica restrittiva (solo margine <= 1 e unanimità)
-        # Mantenuta per compatibilità.
         if llm_candidate == mv_prediction:
             return (
                 mv_prediction,
@@ -749,7 +734,6 @@ class LLMPredictor:
                 mv_margin,
             )
 
-        # Override solo se MV è incerta (margine <= 1) e LLM unanime
         if mv_margin <= 1 and llm_unanimous:
             return (
                 llm_candidate,
