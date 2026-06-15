@@ -54,7 +54,7 @@ def main() -> None:
     print(f"Output CSV:         {MAJORITY_VOTING_OUTPUT_CSV}")
     print("=" * 80)
 
-    print("\n1. Caricamento campionato dei dataset...")
+    print("\n1. Caricamento dei dataset...")
 
     train = Dataset.from_csv(
         TRAIN_CSV,
