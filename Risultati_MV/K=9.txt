@@ -1,0 +1,39 @@
+================================================================================
+                      RAG con MAJORITY VOTING (senza LLM)                       
+================================================================================
+Training limit:     10000
+Test limit:         None
+Top MI features:    256
+Vicini FAISS (k):   9
+Output CSV:         majority_voting_predictions.csv
+================================================================================
+
+ACCURATEZZA: 75.47%
+
+Distribuzione predizioni finali:
+prediction
+goodware    18783
+malware      8252
+
+Origine decisioni:
+pred_type
+MV    27035
+
+Dettaglio sorgenti interne:
+decision_source
+majority_voting    27035
+
+Matrice di confusione:
+               pred_goodware  pred_malware
+true_goodware          12823           671
+true_malware            5960          7581
+
+Classification report:
+              precision    recall  f1-score   support
+
+    goodware       0.68      0.95      0.79     13494
+     malware       0.92      0.56      0.70     13541
+
+    accuracy                           0.75     27035
+   macro avg       0.80      0.76      0.75     27035
+weighted avg       0.80      0.75      0.75     27035
