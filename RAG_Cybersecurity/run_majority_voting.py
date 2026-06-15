@@ -147,7 +147,7 @@ def main() -> None:
     accuracy = float((y_true == y_pred).mean())
 
     print("\n" + "=" * 80)
-    print(f"ACCURACY: {accuracy * 100:.2f}%")
+    print(f"ACCURATEZZA: {accuracy * 100:.2f}%")
 
     print("\nDistribuzione predizioni finali:")
     print(result["prediction"].value_counts().to_string())
