@@ -1,0 +1,64 @@
+================================================================================
+                      RAG con MAJORITY VOTING (senza LLM)                       
+================================================================================
+Training limit:     None
+Test limit:         None
+Top MI features:    256
+Vicini FAISS (k):   9
+Output CSV:         majority_voting_predictions.csv
+================================================================================
+
+1. Caricamento dei dataset...
+   Training usato: 134435, classi={0: 77142, 1: 57293}
+   Test usato:     27035, classi={0: 13494, 1: 13541}
+
+2. Selezione feature tramite Mutual Information...
+    1. datadir_3: 0.536440
+    2. header_0: 0.534936
+    3. datadir_4: 0.498264
+    4. section_98: 0.452624
+    5. section_148: 0.445468
+    6. section_146: 0.424203
+    7. section_96: 0.405753
+    8. header_59: 0.371893
+    9. general_file_4: 0.371220
+   10. datadir_2: 0.344603
+
+3. Costruzione indice FAISS numerico...
+
+4. Predizione mediante Majority Voting...
+
+================================================================================
+ACCURACY: 71.98%
+
+Distribuzione predizioni finali:
+prediction
+goodware    20356
+malware      6679
+
+Origine decisioni:
+pred_type
+MV    27035
+
+Dettaglio sorgenti interne:
+decision_source
+majority_voting    27035
+
+Matrice di confusione:
+               pred_goodware  pred_malware
+true_goodware          13138           356
+true_malware            7218          6323
+
+Classification report:
+              precision    recall  f1-score   support
+
+    goodware       0.65      0.97      0.78     13494
+     malware       0.95      0.47      0.63     13541
+
+    accuracy                           0.72     27035
+   macro avg       0.80      0.72      0.70     27035
+weighted avg       0.80      0.72      0.70     27035
+
+================================================================================
+
+CSV salvato in: majority_voting_predictions.csv
