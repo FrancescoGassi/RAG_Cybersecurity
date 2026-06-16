@@ -13,7 +13,7 @@ BALANCE_TRAINING = False
 BALANCE_TEST = False
 
 # Selezione feature e retrieval
-TOP_K_FEATURES: int | None = None   # None = usa tutte le feature (salta MI)
+TOP_K_FEATURES: int = 128   # None = usa tutte le feature (salta MI)
 K_NEIGHBORS = 3
 HYBRID_MAJORITY_WEIGHT = 0.50  # 0.50 conteggio + 0.50 similarità
 
