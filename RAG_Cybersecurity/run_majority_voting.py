@@ -66,7 +66,7 @@ def cache_signature(feature_names: list[str]) -> str:
         str(TRAIN_SAMPLE_SIZE),
         str(BALANCE_TRAINING),
         str(RANDOM_SEED),
-        str(TOP_K_FEATURES),
+        str(TOP_K_FEATURES),  # ora può essere None
         EMBEDDING_MODEL_NAME,
         str(EMBEDDING_TOP_FEATURES_PER_SAMPLE),
         str(EMBEDDING_FEATURES_PER_CHUNK),
@@ -119,8 +119,12 @@ def load_data() -> tuple[Dataset, Dataset, list[str]]:
     )
     selected_test = test.select_features(feature_names)
 
-    for position, feature in enumerate(feature_names[:10], start=1):
-        print(f"   {position:2d}. {feature}: {scores[feature]:.6f}")
+    if TOP_K_FEATURES is not None and scores:
+        for position, feature in enumerate(feature_names[:10], start=1):
+            print(f"   {position:2d}. {feature}: {scores[feature]:.6f}")
+    else:
+        print(f"   Usate tutte le {len(feature_names)} feature (nessuna selezione MI).")
+
     return selected_train, selected_test, feature_names
 
 
@@ -158,12 +162,16 @@ def get_index(train: Dataset, feature_names: list[str]) -> FaissRAGIndex:
 
 
 def main() -> None:
-    # ========== BANNER CORRETTO ==========
+    # ========== BANNER ==========
     print("=" * 80)
     print("                      RAG con MAJORITY VOTING (senza LLM)                       ")
     print("=" * 80)
     print(f"Modello embedding: {EMBEDDING_MODEL_NAME}")
     print(f"Vicini FAISS (k):  {K_NEIGHBORS}")
+    if TOP_K_FEATURES is None:
+        print(f"Selezione feature: USATE TUTTE ({len(EMBEDDING_MODEL_NAME)})")
+    else:
+        print(f"Selezione feature: TOP {TOP_K_FEATURES} (via MI)")
     print("=" * 80)
     # ====================================
 
