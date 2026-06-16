@@ -122,9 +122,15 @@ class Dataset:
 
     def select_best_features(
         self,
-        top_k: int,
+        top_k: int | None,
         random_seed: int,
     ) -> tuple["Dataset", list[str], dict[str, float]]:
+        # Se top_k è None o maggiore/uguale al numero di feature, usa tutte
+        if top_k is None or top_k >= len(self.X.columns):
+            feature_names = self.X.columns.tolist()
+            score_map = {name: 1.0 for name in feature_names}
+            return Dataset(self.X.copy(), self.y.copy()), feature_names, score_map
+
         if top_k <= 0:
             raise ValueError("TOP_K_FEATURES deve essere maggiore di zero.")
 
