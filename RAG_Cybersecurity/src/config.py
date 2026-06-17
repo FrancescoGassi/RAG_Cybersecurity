@@ -29,5 +29,18 @@ SHOW_PROGRESS = True
 # Cache e output
 CACHE_DIR = "cache"
 CACHE_NAME = "training_index"
+CACHE_VERSION = "1"                     # aggiunta per compatibilità
 FORCE_REBUILD_INDEX = True
 OUTPUT_CSV = "majority_voting_embedding_predictions.csv"
+
+# LLM (usato solo da run_rag.py)
+LLM_MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
+DEBUG_LLM = False
+USE_4BIT = True
+MAX_PROMPT_TOKENS = 2048
+MAX_NEW_TOKENS = 10
+MAX_EXAMPLES_IN_PROMPT = 5
+MAX_FEATURES_IN_PROMPT = 20
+MIN_FEATURES_IN_PROMPT = 3
+PROMPT_VARIANTS = 3
+MIN_CONSISTENT_LLM_VOTES = 2

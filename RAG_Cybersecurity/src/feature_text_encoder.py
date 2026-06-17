@@ -30,7 +30,6 @@ class FeatureTextEncoder:
         else:
             selected = np.argpartition(np.abs(values), -count)[-count:]
 
-        # Ordine stabile per rendere confrontabili i testi.
         selected = sorted(int(index) for index in selected)
         statements = [
             f"{self.feature_names[index]} has standardized value {values[index]:+.4f}"

@@ -25,9 +25,7 @@ from src.config import (
     USE_4BIT,
 )
 from src.feature_names import BODMASFeatureNames
-
-if TYPE_CHECKING:
-    from src.faiss_rag_index import FaissRAGIndex, Neighbor
+from src.faiss_rag_index import FaissRAGIndex, Neighbor
 
 
 CLASS_NAME = {
@@ -291,7 +289,7 @@ class LLMPredictor:
     def _build_messages(
         self,
         query_z: np.ndarray,
-        examples: list["Neighbor"],
+        examples: list[Neighbor],
         feature_names: list[str],
         max_features: int,
         max_examples: int,
@@ -314,14 +312,16 @@ class LLMPredictor:
                 "feature_names."
             )
 
+        # Ordina per similarità decrescente
         ordered_examples = sorted(
             examples,
             key=lambda example: example.similarity,
             reverse=True,
         )
 
+        # Verifica che i vettori degli esempi siano della stessa lunghezza
         for example in ordered_examples:
-            if len(example.z_vector) != len(query_vector):
+            if len(example.vector) != len(query_vector):
                 raise ValueError(
                     "Query ed esempio FAISS hanno dimensioni differenti."
                 )
@@ -446,12 +446,11 @@ class LLMPredictor:
 
         for number, example in enumerate(prompt_examples, start=1):
             example_vector = np.asarray(
-                example.z_vector,
+                example.vector,
                 dtype=np.float32,
             ).reshape(-1)
 
-            # La distanza è calcolata su tutte le feature selezionate,
-            # non soltanto su quelle mostrate nel prompt.
+            # La distanza media assoluta su tutte le feature
             mean_feature_distance = float(
                 np.mean(np.abs(query_vector - example_vector))
             )
@@ -502,7 +501,7 @@ class LLMPredictor:
     def _prepare_prompt(
         self,
         query_z: np.ndarray,
-        examples: list["Neighbor"],
+        examples: list[Neighbor],
         feature_names: list[str],
         variant: PromptVariant,
     ) -> tuple[str, int, int, int]:
@@ -578,7 +577,7 @@ class LLMPredictor:
     def _generate_one(
         self,
         query_z: np.ndarray,
-        examples: list["Neighbor"],
+        examples: list[Neighbor],
         feature_names: list[str],
         variant: PromptVariant,
     ) -> tuple[Optional[int], str, int]:
@@ -757,8 +756,9 @@ class LLMPredictor:
         self,
         test_features: pd.DataFrame,
         true_labels: list[int],
-        index: "FaissRAGIndex",
+        index: FaissRAGIndex,
         output_csv: str,
+        k: int = K_NEIGHBORS,
     ) -> pd.DataFrame:
         """Predice le classi e salva il CSV compatto richiesto dal progetto."""
         if self.model is None:
@@ -843,16 +843,13 @@ class LLMPredictor:
             row = np.asarray(row_values, dtype=np.float64)
             true_label = int(true_label)
 
-            (
-                mv_prediction,
-                mv_counts,
-                natural_neighbors,
-            ) = index.majority_vote(
-                row,
-                k=K_NEIGHBORS,
+            # Ottieni predizione MV e vicini
+            mv_prediction, mv_counts, natural_neighbors = index.majority_vote(
+                row, k=k
             )
 
-            query_z, _ = index.transform_query(row)
+            # Ottieni il vettore standardizzato della query
+            query_z = index.transform_vector(row)
 
             if self.debug:
                 print(
@@ -870,7 +867,7 @@ class LLMPredictor:
 
             for variant in variants:
                 vote, raw_output, token_count = self._generate_one(
-                    query_z[0],
+                    query_z,
                     natural_neighbors,
                     index.feature_names,
                     variant,

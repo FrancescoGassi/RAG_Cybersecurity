@@ -26,11 +26,19 @@ from src.config import (
     BALANCE_TRAINING,
     CACHE_DIR,
     CACHE_VERSION,
+    EMBEDDING_BATCH_SIZE,
+    EMBEDDING_DEVICE,
+    EMBEDDING_FEATURES_PER_CHUNK,
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_SAMPLE_BATCH_SIZE,
+    EMBEDDING_TOP_FEATURES_PER_SAMPLE,
     FORCE_REBUILD_INDEX,
     K_NEIGHBORS,
     LLM_MODEL_NAME,
     OUTPUT_CSV,
     RANDOM_SEED,
+    SHOW_PROGRESS,
+    TARGET_COLUMN,
     TEST_CSV,
     TEST_LIMIT,
     TOP_K_FEATURES,
@@ -61,6 +69,9 @@ def cache_signature(features: list[str], train: Dataset) -> str:
         "balance_training": BALANCE_TRAINING,
         "features": features,
         "seed": RANDOM_SEED,
+        "embedding_model": EMBEDDING_MODEL_NAME,
+        "top_features_per_sample": EMBEDDING_TOP_FEATURES_PER_SAMPLE,
+        "features_per_chunk": EMBEDDING_FEATURES_PER_CHUNK,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -93,14 +104,16 @@ def main() -> None:
 
     train = Dataset.from_csv(
         TRAIN_CSV,
+        target_column=TARGET_COLUMN,
         limit=TRAIN_SAMPLE_SIZE,
-        random_state=RANDOM_SEED,
+        random_seed=RANDOM_SEED,
         balanced=BALANCE_TRAINING,
     )
     test = Dataset.from_csv(
         TEST_CSV,
+        target_column=TARGET_COLUMN,
         limit=TEST_LIMIT,
-        random_state=RANDOM_SEED,
+        random_seed=RANDOM_SEED,
         balanced=BALANCE_TEST,
     )
 
@@ -115,30 +128,36 @@ def main() -> None:
 
     print("\n2. Selezione feature con Mutual Information...")
 
-    mi_scores = train.compute_mutual_information(
-        random_state=RANDOM_SEED
+    train_selected, selected_features, mi_scores = train.select_best_features(
+        TOP_K_FEATURES,
+        RANDOM_SEED,
     )
-    selected_features = list(mi_scores)[:TOP_K_FEATURES]
+    test_selected = test.select_features(selected_features)
 
     for rank, feature in enumerate(selected_features[:10], start=1):
         print(f"   {rank:2d}. {feature}: {mi_scores[feature]:.6f}")
-
-    train_selected = train.select_features(selected_features)
-    test_selected = test.select_features(selected_features)
 
     print("\n3. Costruzione/caricamento indice FAISS numerico...")
 
     cache_dir = Path(CACHE_DIR)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    index_prefix = cache_dir / "bodmas_rag_mv"
+    # Usiamo un prefisso specifico per RAG
+    index_prefix = cache_dir / "bodmas_rag_llm"
 
-    expected_signature = cache_signature(
-        selected_features, train_selected
+    expected_signature = cache_signature(selected_features, train_selected)
+
+    # Crea l'indice con i parametri di embedding
+    index = FaissRAGIndex(
+        model_name=EMBEDDING_MODEL_NAME,
+        embedding_batch_size=EMBEDDING_BATCH_SIZE,
+        sample_batch_size=EMBEDDING_SAMPLE_BATCH_SIZE,
+        top_features_per_sample=EMBEDDING_TOP_FEATURES_PER_SAMPLE,
+        features_per_chunk=EMBEDDING_FEATURES_PER_CHUNK,
+        device=EMBEDDING_DEVICE,
+        show_progress=SHOW_PROGRESS,
     )
 
-    index = FaissRAGIndex()
     cache_valid = False
-
     if (
         not FORCE_REBUILD_INDEX
         and FaissRAGIndex.exists(index_prefix)
@@ -152,9 +171,8 @@ def main() -> None:
 
     if FORCE_REBUILD_INDEX or not cache_valid:
         index.fit(
-            train_selected.feat_data,
-            train_selected.target_data.to_numpy(dtype=int),
-            selected_features,
+            train_selected.X,
+            train_selected.y.to_numpy(dtype=np.int64),
             cache_signature=expected_signature,
         )
         index.save(index_prefix)
@@ -164,16 +182,21 @@ def main() -> None:
 
     print("\n4. Caricamento LLM...")
 
-    predictor = LLMPredictor()
+    predictor = LLMPredictor(
+        model_name=LLM_MODEL_NAME,
+        debug=False,
+        use_4bit=True,
+    )
     predictor.load()
 
     print("\n5. Predizione RAG...")
 
     result = predictor.predict(
-        test_selected.feat_data,
-        test_selected.target_data.astype(int).tolist(),
+        test_selected.X,
+        test_selected.y.astype(int).tolist(),
         index,
         OUTPUT_CSV,
+        k=K_NEIGHBORS,
     )
 
     if result.empty:

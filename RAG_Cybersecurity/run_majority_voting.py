@@ -66,7 +66,7 @@ def cache_signature(feature_names: list[str]) -> str:
         str(TRAIN_SAMPLE_SIZE),
         str(BALANCE_TRAINING),
         str(RANDOM_SEED),
-        str(TOP_K_FEATURES),  # ora può essere None
+        str(TOP_K_FEATURES),
         EMBEDDING_MODEL_NAME,
         str(EMBEDDING_TOP_FEATURES_PER_SAMPLE),
         str(EMBEDDING_FEATURES_PER_CHUNK),
@@ -169,7 +169,7 @@ def main() -> None:
     print(f"Modello embedding: {EMBEDDING_MODEL_NAME}")
     print(f"Vicini FAISS (k):  {K_NEIGHBORS}")
     if TOP_K_FEATURES is None:
-        print(f"Selezione feature: USATE TUTTE ({len(EMBEDDING_MODEL_NAME)})")
+        print(f"Selezione feature: USATE TUTTE")
     else:
         print(f"Selezione feature: TOP {TOP_K_FEATURES} (via MI)")
     print("=" * 80)

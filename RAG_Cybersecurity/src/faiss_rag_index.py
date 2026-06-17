@@ -19,6 +19,7 @@ class Neighbor:
     index: int
     label: int
     similarity: float
+    vector: np.ndarray          # vettore standardizzato (dopo imputer e scaler)
 
 
 class FaissRAGIndex:
@@ -47,6 +48,7 @@ class FaissRAGIndex:
         self.labels: np.ndarray | None = None
         self.empty_feature_names: list[str] = []
         self.cache_signature: str | None = None
+        self.training_vectors: np.ndarray | None = None   # vettori standardizzati del training
 
         self._model: EmbeddingModel | None = None
         self._encoder: FeatureTextEncoder | None = None
@@ -137,10 +139,88 @@ class FaissRAGIndex:
         if not np.isfinite(scaled).all():
             raise RuntimeError("Il training standardizzato non è valido.")
 
+        # Conserva i vettori standardizzati per i vicini
+        self.training_vectors = scaled.copy()
+
         vectors = self._encode_matrix(scaled, "Embedding training")
         faiss = self._faiss()
         self.index = faiss.IndexFlatIP(vectors.shape[1])
         self.index.add(vectors)
+
+    def transform_vector(self, vector: np.ndarray) -> np.ndarray:
+        """Applica imputer e scaler a un singolo vettore (1D) e restituisce il vettore standardizzato."""
+        if self.imputer is None or self.scaler is None:
+            raise RuntimeError("Indice non costruito o non caricato.")
+        vector = np.asarray(vector, dtype=np.float64).reshape(1, -1)
+        if vector.shape[1] != len(self.feature_names):
+            raise ValueError("Numero di feature diverso da quello del training.")
+        # Imputa e scala
+        imputed = self.imputer.transform(vector)
+        scaled = self.scaler.transform(imputed).astype(np.float32)
+        return scaled.reshape(-1)
+
+    def search_one(self, vector: np.ndarray, k: int) -> list[Neighbor]:
+        """Cerca i k vicini più prossimi per un singolo vettore (1D)."""
+        if self.index is None or self.labels is None or self.training_vectors is None:
+            raise RuntimeError("Indice non disponibile.")
+        if k <= 0:
+            raise ValueError("k deve essere maggiore di zero.")
+
+        # Trasforma il vettore query
+        query_scaled = self.transform_vector(vector)
+        # Calcola l'embedding della query
+        encoder = self._get_encoder()
+        chunks = encoder.row_to_chunks(query_scaled)
+        chunk_vectors = self._get_model().encode(chunks, self.embedding_batch_size)
+        query_embedding = chunk_vectors.mean(axis=0)
+        norm = float(np.linalg.norm(query_embedding))
+        if not np.isfinite(norm) or norm <= 0.0:
+            raise RuntimeError("Embedding query non valido.")
+        query_embedding = (query_embedding / norm).astype(np.float32).reshape(1, -1)
+
+        real_k = min(int(k), int(self.index.ntotal))
+        similarities, indices = self.index.search(query_embedding, real_k)
+
+        neighbors = []
+        for sim, idx in zip(similarities[0], indices[0]):
+            if idx < 0:
+                continue
+            neighbors.append(
+                Neighbor(
+                    index=int(idx),
+                    label=int(self.labels[idx]),
+                    similarity=float(sim),
+                    vector=self.training_vectors[idx].copy(),
+                )
+            )
+        return neighbors
+
+    def search_many(self, X: pd.DataFrame, k: int) -> list[list[Neighbor]]:
+        if self.index is None or self.labels is None or self.training_vectors is None:
+            raise RuntimeError("Indice non disponibile.")
+        if k <= 0:
+            raise ValueError("k deve essere maggiore di zero.")
+
+        queries = self._prepare_queries(X)
+        real_k = min(int(k), int(self.index.ntotal))
+        similarities, indices = self.index.search(queries, real_k)
+
+        result = []
+        for row_sim, row_idx in zip(similarities, indices):
+            neighbors = []
+            for sim, idx in zip(row_sim, row_idx):
+                if idx < 0:
+                    continue
+                neighbors.append(
+                    Neighbor(
+                        index=int(idx),
+                        label=int(self.labels[idx]),
+                        similarity=float(sim),
+                        vector=self.training_vectors[idx].copy(),
+                    )
+                )
+            result.append(neighbors)
+        return result
 
     def _prepare_queries(self, X: pd.DataFrame) -> np.ndarray:
         if self.index is None or self.imputer is None or self.scaler is None:
@@ -158,25 +238,6 @@ class FaissRAGIndex:
         scaled = self.scaler.transform(imputed).astype(np.float32)
         return self._encode_matrix(scaled, "Embedding test")
 
-    def search_many(self, X: pd.DataFrame, k: int) -> list[list[Neighbor]]:
-        if self.index is None or self.labels is None:
-            raise RuntimeError("Indice non disponibile.")
-        if k <= 0:
-            raise ValueError("k deve essere maggiore di zero.")
-
-        queries = self._prepare_queries(X)
-        real_k = min(int(k), int(self.index.ntotal))
-        similarities, indices = self.index.search(queries, real_k)
-
-        return [
-            [
-                Neighbor(int(index), int(self.labels[index]), float(similarity))
-                for similarity, index in zip(row_sim, row_idx)
-                if int(index) >= 0
-            ]
-            for row_sim, row_idx in zip(similarities, indices)
-        ]
-
     @staticmethod
     def hybrid_vote(
         neighbors: list[Neighbor],
@@ -192,8 +253,6 @@ class FaissRAGIndex:
             for label in (0, 1)
         }
 
-        # Le similarità cosine negative non forniscono evidenza utile.
-        # Le similarità positive vengono sommate per classe.
         weights = [max(0.0, float(n.similarity)) for n in neighbors]
         total_weight = sum(weights)
         if total_weight == 0.0:
@@ -219,6 +278,18 @@ class FaissRAGIndex:
         if combined[0] == combined[1]:
             return int(neighbors[0].label)
         return 0 if combined[0] > combined[1] else 1
+
+    def majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
+        """Predice la classe per un singolo vettore usando il voto di maggioranza ibrido."""
+        neighbors = self.search_one(vector, k)
+        if not neighbors:
+            raise RuntimeError("Nessun vicino trovato.")
+        counts = {0: 0, 1: 0}
+        for n in neighbors:
+            counts[n.label] += 1
+        # Usa il voto ibrido con il peso di default (si può passare come parametro se necessario)
+        pred = self.hybrid_vote(neighbors, 0.5)  # o usa il valore da config
+        return pred, counts, neighbors
 
     def predict_many(
         self,
@@ -259,6 +330,7 @@ class FaissRAGIndex:
             "cache_signature": self.cache_signature,
             "top_features_per_sample": self.top_features_per_sample,
             "features_per_chunk": self.features_per_chunk,
+            "training_vectors": self.training_vectors,  # salviamo anche questi
         }
         with pkl_path.open("wb") as file:
             pickle.dump(metadata, file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -278,5 +350,6 @@ class FaissRAGIndex:
         self.cache_signature = metadata.get("cache_signature")
         self.top_features_per_sample = int(metadata["top_features_per_sample"])
         self.features_per_chunk = int(metadata["features_per_chunk"])
+        self.training_vectors = metadata.get("training_vectors")  # caricamento
         self._model = None
         self._encoder = None

@@ -125,7 +125,6 @@ class Dataset:
         top_k: int | None,
         random_seed: int,
     ) -> tuple["Dataset", list[str], dict[str, float]]:
-        # Se top_k è None o maggiore/uguale al numero di feature, usa tutte
         if top_k is None or top_k >= len(self.X.columns):
             feature_names = self.X.columns.tolist()
             score_map = {name: 1.0 for name in feature_names}
@@ -134,7 +133,6 @@ class Dataset:
         if top_k <= 0:
             raise ValueError("TOP_K_FEATURES deve essere maggiore di zero.")
 
-        # La mediana è calcolata solo sul training per la selezione MI.
         medians = self.X.median(numeric_only=True).fillna(0.0)
         X_ready = self.X.fillna(medians).fillna(0.0)
 
