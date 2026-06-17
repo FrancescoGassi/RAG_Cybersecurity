@@ -13,13 +13,13 @@ BALANCE_TRAINING = False
 BALANCE_TEST = False
 
 # Selezione feature e retrieval
-TOP_K_FEATURES: int = 128   # None = usa tutte le feature (salta MI)
+TOP_K_FEATURES: int = 256
 K_NEIGHBORS = 3
 HYBRID_MAJORITY_WEIGHT = 0.50  # 0.50 conteggio + 0.50 similarità
 
 # Embedding
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_BATCH_SIZE = 64
+EMBEDDING_BATCH_SIZE = 128
 EMBEDDING_SAMPLE_BATCH_SIZE = 128
 EMBEDDING_TOP_FEATURES_PER_SAMPLE = 32
 EMBEDDING_FEATURES_PER_CHUNK = 8
