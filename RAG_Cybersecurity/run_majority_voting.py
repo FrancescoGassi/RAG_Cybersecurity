@@ -30,7 +30,9 @@ from src.config import (
     HYBRID_MAJORITY_WEIGHT,
     K_NEIGHBORS,
     OUTPUT_CSV,
+    PURE_MAJORITY_VOTING,
     RANDOM_SEED,
+    RETRIEVAL_MODE,
     SHOW_PROGRESS,
     TARGET_COLUMN,
     TEST_CSV,
@@ -70,6 +72,7 @@ def cache_signature(feature_names: list[str]) -> str:
         EMBEDDING_MODEL_NAME,
         str(EMBEDDING_TOP_FEATURES_PER_SAMPLE),
         str(EMBEDDING_FEATURES_PER_CHUNK),
+        RETRIEVAL_MODE,          # aggiunto per distinguere la cache
         *feature_names,
     ]
     return hashlib.sha256("\n".join(values).encode("utf-8")).hexdigest()
@@ -78,10 +81,9 @@ def cache_signature(feature_names: list[str]) -> str:
 def validate_config() -> None:
     if K_NEIGHBORS <= 0:
         raise ValueError("K_NEIGHBORS deve essere maggiore di zero.")
-    if not 0.0 < HYBRID_MAJORITY_WEIGHT < 1.0:
+    if not PURE_MAJORITY_VOTING and not 0.0 < HYBRID_MAJORITY_WEIGHT < 1.0:
         raise ValueError(
-            "HYBRID_MAJORITY_WEIGHT deve essere strettamente tra 0 e 1 "
-            "per ottenere un voto realmente ibrido."
+            "Se PURE_MAJORITY_VOTING è False, HYBRID_MAJORITY_WEIGHT deve essere strettamente tra 0 e 1."
         )
     if EMBEDDING_BATCH_SIZE <= 0 or EMBEDDING_SAMPLE_BATCH_SIZE <= 0:
         raise ValueError("I batch size devono essere maggiori di zero.")
@@ -164,7 +166,10 @@ def get_index(train: Dataset, feature_names: list[str]) -> FaissRAGIndex:
 def main() -> None:
     # ========== BANNER ==========
     print("=" * 80)
-    print("                      RAG con MAJORITY VOTING (senza LLM)                       ")
+    if PURE_MAJORITY_VOTING:
+        print("                    RAG con PURE MAJORITY VOTING (solo conteggio)                     ")
+    else:
+        print("                    RAG con HYBRID MAJORITY VOTING (conteggio + similarità)            ")
     print("=" * 80)
     print(f"Modello embedding: {EMBEDDING_MODEL_NAME}")
     print(f"Vicini FAISS (k):  {K_NEIGHBORS}")
@@ -172,6 +177,7 @@ def main() -> None:
         print(f"Selezione feature: USATE TUTTE")
     else:
         print(f"Selezione feature: TOP {TOP_K_FEATURES} (via MI)")
+    print(f"Modalità retrieval: {RETRIEVAL_MODE.upper()}")
     print("=" * 80)
     # ====================================
 
@@ -182,20 +188,31 @@ def main() -> None:
 
     index = get_index(train, feature_names)
 
-    print("\n4. Retrieval e Hybrid Majority Voting...")
+    if PURE_MAJORITY_VOTING:
+        majority_weight = 1.0
+        pred_type_label = "PMV"   # Pure Majority Voting
+    else:
+        majority_weight = HYBRID_MAJORITY_WEIGHT
+        pred_type_label = "HMV"   # Hybrid Majority Voting
+
+    print(f"\n4. Retrieval e Majority Voting (peso conteggio = {majority_weight:.2f})...")
     predictions = index.predict_many(
         test.X,
         K_NEIGHBORS,
-        HYBRID_MAJORITY_WEIGHT,
+        majority_weight,
     )
     y_true = test.y.to_numpy(dtype=np.int64)
 
+    base, ext = OUTPUT_CSV.rsplit(".", 1)
+    output_csv = f"{base}_{RETRIEVAL_MODE}.{ext}"
+
     output = pd.DataFrame({
-        "prediction": [label_name(value) for value in predictions],
-        "true_label": [label_name(value) for value in y_true],
-        "pred_type": ["HMV"] * len(predictions),
+        "prediction": [label_name(v) for v in predictions],
+        "true_label": [label_name(v) for v in y_true],
+        "pred_type": [pred_type_label] * len(predictions),
+        "retrieval_mode": [RETRIEVAL_MODE] * len(predictions),
     })
-    output.to_csv(OUTPUT_CSV, index=False)
+    output.to_csv(output_csv, index=False)
 
     print("\n" + "=" * 70)
     print(f"Accuracy:  {accuracy_score(y_true, predictions):.4f}")
@@ -212,7 +229,7 @@ def main() -> None:
         target_names=["goodware", "malware"],
         zero_division=0,
     ))
-    print(f"CSV salvato in: {OUTPUT_CSV}")
+    print(f"CSV salvato in: {output_csv}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from src.embedding import EmbeddingModel
 from src.feature_text_encoder import FeatureTextEncoder
+from src.config import RETRIEVAL_MODE
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ class FaissRAGIndex:
         self.labels: np.ndarray | None = None
         self.empty_feature_names: list[str] = []
         self.cache_signature: str | None = None
-        self.training_vectors: np.ndarray | None = None   # vettori standardizzati del training
+        self.training_vectors: np.ndarray | None = None
 
         self._model: EmbeddingModel | None = None
         self._encoder: FeatureTextEncoder | None = None
@@ -60,6 +61,16 @@ class FaissRAGIndex:
         except ImportError as exc:
             raise ImportError("Installare FAISS con: pip install faiss-cpu") from exc
         return faiss
+
+    @staticmethod
+    def _normalize_inplace(arr: np.ndarray) -> np.ndarray:
+        """Assicura che l'array sia C-contiguous e lo normalizza L2 in-place.
+        
+        FAISS richiede array C-contiguous per operazioni in-place.
+        """
+        arr = np.ascontiguousarray(arr)
+        FaissRAGIndex._faiss().normalize_L2(arr)
+        return arr
 
     def _get_model(self) -> EmbeddingModel:
         if self._model is None:
@@ -139,22 +150,30 @@ class FaissRAGIndex:
         if not np.isfinite(scaled).all():
             raise RuntimeError("Il training standardizzato non è valido.")
 
-        # Conserva i vettori standardizzati per i vicini
         self.training_vectors = scaled.copy()
 
-        vectors = self._encode_matrix(scaled, "Embedding training")
         faiss = self._faiss()
-        self.index = faiss.IndexFlatIP(vectors.shape[1])
-        self.index.add(vectors)
+        if RETRIEVAL_MODE == "raw":
+            # BASELINE NUMERICA: vettori standardizzati normalizzati L2
+            print("   [BASELINE] Utilizzo vettori numerici standardizzati (k-NN puro con similarità coseno)")
+            vectors = np.ascontiguousarray(scaled.astype(np.float32))
+            faiss.normalize_L2(vectors)
+            self.index = faiss.IndexFlatIP(vectors.shape[1])
+            self.index.add(vectors)
+        else:
+            # RAG SEMANTICO: embedding da SentenceTransformer
+            print("   [RAG] Utilizzo embedding semantico (SentenceTransformer)")
+            vectors = self._encode_matrix(scaled, "Embedding training")
+            self.index = faiss.IndexFlatIP(vectors.shape[1])
+            self.index.add(vectors)
 
     def transform_vector(self, vector: np.ndarray) -> np.ndarray:
-        """Applica imputer e scaler a un singolo vettore (1D) e restituisce il vettore standardizzato."""
+        """Applica imputer e scaler a un singolo vettore (1D)."""
         if self.imputer is None or self.scaler is None:
             raise RuntimeError("Indice non costruito o non caricato.")
         vector = np.asarray(vector, dtype=np.float64).reshape(1, -1)
         if vector.shape[1] != len(self.feature_names):
             raise ValueError("Numero di feature diverso da quello del training.")
-        # Imputa e scala
         imputed = self.imputer.transform(vector)
         scaled = self.scaler.transform(imputed).astype(np.float32)
         return scaled.reshape(-1)
@@ -166,20 +185,26 @@ class FaissRAGIndex:
         if k <= 0:
             raise ValueError("k deve essere maggiore di zero.")
 
-        # Trasforma il vettore query
         query_scaled = self.transform_vector(vector)
-        # Calcola l'embedding della query
-        encoder = self._get_encoder()
-        chunks = encoder.row_to_chunks(query_scaled)
-        chunk_vectors = self._get_model().encode(chunks, self.embedding_batch_size)
-        query_embedding = chunk_vectors.mean(axis=0)
-        norm = float(np.linalg.norm(query_embedding))
-        if not np.isfinite(norm) or norm <= 0.0:
-            raise RuntimeError("Embedding query non valido.")
-        query_embedding = (query_embedding / norm).astype(np.float32).reshape(1, -1)
+
+        if RETRIEVAL_MODE == "raw":
+            # Baseline: vettore standardizzato normalizzato
+            query_vec = np.ascontiguousarray(query_scaled.astype(np.float32)).reshape(1, -1)
+            import faiss
+            faiss.normalize_L2(query_vec)
+        else:
+            # RAG semantico: embedding
+            encoder = self._get_encoder()
+            chunks = encoder.row_to_chunks(query_scaled)
+            chunk_vectors = self._get_model().encode(chunks, self.embedding_batch_size)
+            query_embedding = chunk_vectors.mean(axis=0)
+            norm = float(np.linalg.norm(query_embedding))
+            if not np.isfinite(norm) or norm <= 0.0:
+                raise RuntimeError("Embedding query non valido.")
+            query_vec = (query_embedding / norm).astype(np.float32).reshape(1, -1)
 
         real_k = min(int(k), int(self.index.ntotal))
-        similarities, indices = self.index.search(query_embedding, real_k)
+        similarities, indices = self.index.search(query_vec, real_k)
 
         neighbors = []
         for sim, idx in zip(similarities[0], indices[0]):
@@ -236,7 +261,16 @@ class FaissRAGIndex:
             ].fillna(0.0)
         imputed = self.imputer.transform(ordered)
         scaled = self.scaler.transform(imputed).astype(np.float32)
-        return self._encode_matrix(scaled, "Embedding test")
+
+        if RETRIEVAL_MODE == "raw":
+            # Baseline: vettori standardizzati normalizzati
+            scaled = np.ascontiguousarray(scaled)
+            import faiss
+            faiss.normalize_L2(scaled)
+            return scaled
+        else:
+            # RAG semantico: embedding
+            return self._encode_matrix(scaled, "Embedding test")
 
     @staticmethod
     def hybrid_vote(
@@ -280,15 +314,26 @@ class FaissRAGIndex:
         return 0 if combined[0] > combined[1] else 1
 
     def majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
-        """Predice la classe per un singolo vettore usando il voto di maggioranza ibrido."""
         neighbors = self.search_one(vector, k)
         if not neighbors:
             raise RuntimeError("Nessun vicino trovato.")
         counts = {0: 0, 1: 0}
         for n in neighbors:
             counts[n.label] += 1
-        # Usa il voto ibrido con il peso di default (si può passare come parametro se necessario)
-        pred = self.hybrid_vote(neighbors, 0.5)  # o usa il valore da config
+        pred = self.hybrid_vote(neighbors, 0.5)
+        return pred, counts, neighbors
+
+    def pure_majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
+        neighbors = self.search_one(vector, k)
+        if not neighbors:
+            raise RuntimeError("Nessun vicino trovato.")
+        counts = {0: 0, 1: 0}
+        for n in neighbors:
+            counts[n.label] += 1
+        if counts[0] == counts[1]:
+            pred = neighbors[0].label
+        else:
+            pred = 0 if counts[0] > counts[1] else 1
         return pred, counts, neighbors
 
     def predict_many(
@@ -330,7 +375,8 @@ class FaissRAGIndex:
             "cache_signature": self.cache_signature,
             "top_features_per_sample": self.top_features_per_sample,
             "features_per_chunk": self.features_per_chunk,
-            "training_vectors": self.training_vectors,  # salviamo anche questi
+            "training_vectors": self.training_vectors,
+            "retrieval_mode": RETRIEVAL_MODE,
         }
         with pkl_path.open("wb") as file:
             pickle.dump(metadata, file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -350,6 +396,11 @@ class FaissRAGIndex:
         self.cache_signature = metadata.get("cache_signature")
         self.top_features_per_sample = int(metadata["top_features_per_sample"])
         self.features_per_chunk = int(metadata["features_per_chunk"])
-        self.training_vectors = metadata.get("training_vectors")  # caricamento
+        self.training_vectors = metadata.get("training_vectors")
+        
+        saved_mode = metadata.get("retrieval_mode")
+        if saved_mode and saved_mode != RETRIEVAL_MODE:
+            print(f"   AVVISO: l'indice è stato salvato con modalità '{saved_mode}', ma ora è impostato '{RETRIEVAL_MODE}'. Ricostruire l'indice per coerenza.")
+        
         self._model = None
         self._encoder = None
