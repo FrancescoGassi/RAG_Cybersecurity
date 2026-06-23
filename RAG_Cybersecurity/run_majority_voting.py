@@ -27,10 +27,8 @@ from src.config import (
     EMBEDDING_SAMPLE_BATCH_SIZE,
     EMBEDDING_TOP_FEATURES_PER_SAMPLE,
     FORCE_REBUILD_INDEX,
-    HYBRID_MAJORITY_WEIGHT,
     K_NEIGHBORS,
     OUTPUT_CSV,
-    PURE_MAJORITY_VOTING,
     RANDOM_SEED,
     RETRIEVAL_MODE,
     SHOW_PROGRESS,
@@ -72,19 +70,45 @@ def cache_signature(feature_names: list[str]) -> str:
         EMBEDDING_MODEL_NAME,
         str(EMBEDDING_TOP_FEATURES_PER_SAMPLE),
         str(EMBEDDING_FEATURES_PER_CHUNK),
-        RETRIEVAL_MODE,          # aggiunto per distinguere la cache
+        RETRIEVAL_MODE,
         *feature_names,
     ]
     return hashlib.sha256("\n".join(values).encode("utf-8")).hexdigest()
 
 
+def mutual_info_cache_signature() -> str:
+    values = [
+        file_signature(TRAIN_CSV),
+        str(TRAIN_SAMPLE_SIZE),
+        str(BALANCE_TRAINING),
+        str(RANDOM_SEED),
+        str(TARGET_COLUMN),
+    ]
+    return hashlib.sha256("\n".join(values).encode("utf-8")).hexdigest()
+
+
+def get_mutual_info_scores(train: Dataset) -> dict[str, float]:
+    sig = mutual_info_cache_signature()
+    cache_dir = Path(CACHE_DIR) / "mutual_info"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{sig}.csv"
+
+    if cache_file.exists():
+        print("   Caricamento punteggi MI da cache...")
+        df = pd.read_csv(cache_file)
+        return {row['feature']: row['score'] for _, row in df.iterrows()}
+
+    print("   Calcolo Mutual Information su tutte le feature (prima esecuzione o dati cambiati)...")
+    scores = train.compute_mutual_info(RANDOM_SEED)
+    df = pd.DataFrame(list(scores.items()), columns=['feature', 'score'])
+    df.to_csv(cache_file, index=False)
+    print(f"   Punteggi MI salvati in {cache_file}")
+    return scores
+
+
 def validate_config() -> None:
     if K_NEIGHBORS <= 0:
         raise ValueError("K_NEIGHBORS deve essere maggiore di zero.")
-    if not PURE_MAJORITY_VOTING and not 0.0 < HYBRID_MAJORITY_WEIGHT < 1.0:
-        raise ValueError(
-            "Se PURE_MAJORITY_VOTING è False, HYBRID_MAJORITY_WEIGHT deve essere strettamente tra 0 e 1."
-        )
     if EMBEDDING_BATCH_SIZE <= 0 or EMBEDDING_SAMPLE_BATCH_SIZE <= 0:
         raise ValueError("I batch size devono essere maggiori di zero.")
     file_signature(TRAIN_CSV)
@@ -114,20 +138,25 @@ def load_data() -> tuple[Dataset, Dataset, list[str]]:
     print(f"   Training: {len(train)}, classi={train.class_counts()}")
     print(f"   Test:     {len(test)}, classi={test.class_counts()}")
 
-    print("\n2. Selezione feature con Mutual Information...")
-    selected_train, feature_names, scores = train.select_best_features(
-        TOP_K_FEATURES,
-        RANDOM_SEED,
-    )
-    selected_test = test.select_features(feature_names)
+    print("\n2. Selezione feature con Mutual Information (cache abilitata)...")
+    mi_scores = get_mutual_info_scores(train)
+    sorted_features = sorted(mi_scores.items(), key=lambda x: -x[1])
 
-    if TOP_K_FEATURES is not None and scores:
-        for position, feature in enumerate(feature_names[:10], start=1):
-            print(f"   {position:2d}. {feature}: {scores[feature]:.6f}")
+    if TOP_K_FEATURES is not None and TOP_K_FEATURES < len(sorted_features):
+        selected_features = [f for f, _ in sorted_features[:TOP_K_FEATURES]]
     else:
-        print(f"   Usate tutte le {len(feature_names)} feature (nessuna selezione MI).")
+        selected_features = [f for f, _ in sorted_features]
 
-    return selected_train, selected_test, feature_names
+    for pos, (feature, score) in enumerate(sorted_features[:10], start=1):
+        print(f"   {pos:2d}. {feature}: {score:.6f}")
+    if TOP_K_FEATURES is not None:
+        print(f"   Selezionate {len(selected_features)} feature su {len(sorted_features)} totali.")
+    else:
+        print(f"   Usate tutte le {len(selected_features)} feature (nessuna selezione).")
+
+    selected_train = train.select_features(selected_features)
+    selected_test = test.select_features(selected_features)
+    return selected_train, selected_test, selected_features
 
 
 def create_index() -> FaissRAGIndex:
@@ -164,12 +193,8 @@ def get_index(train: Dataset, feature_names: list[str]) -> FaissRAGIndex:
 
 
 def main() -> None:
-    # ========== BANNER ==========
     print("=" * 80)
-    if PURE_MAJORITY_VOTING:
-        print("                    RAG con PURE MAJORITY VOTING (solo conteggio)                     ")
-    else:
-        print("                    RAG con HYBRID MAJORITY VOTING (conteggio + similarità)            ")
+    print("                    RAG con PURE MAJORITY VOTING (solo conteggio)                     ")
     print("=" * 80)
     print(f"Modello embedding: {EMBEDDING_MODEL_NAME}")
     print(f"Vicini FAISS (k):  {K_NEIGHBORS}")
@@ -179,7 +204,6 @@ def main() -> None:
         print(f"Selezione feature: TOP {TOP_K_FEATURES} (via MI)")
     print(f"Modalità retrieval: {RETRIEVAL_MODE.upper()}")
     print("=" * 80)
-    # ====================================
 
     validate_config()
     train, test, feature_names = load_data()
@@ -188,19 +212,10 @@ def main() -> None:
 
     index = get_index(train, feature_names)
 
-    if PURE_MAJORITY_VOTING:
-        majority_weight = 1.0
-        pred_type_label = "PMV"   # Pure Majority Voting
-    else:
-        majority_weight = HYBRID_MAJORITY_WEIGHT
-        pred_type_label = "HMV"   # Hybrid Majority Voting
+    pred_type_label = "PMV"
 
-    print(f"\n4. Retrieval e Majority Voting (peso conteggio = {majority_weight:.2f})...")
-    predictions = index.predict_many(
-        test.X,
-        K_NEIGHBORS,
-        majority_weight,
-    )
+    print(f"\n4. Retrieval e Majority Voting (puro)...")
+    predictions = index.predict_many(test.X, K_NEIGHBORS)
     y_true = test.y.to_numpy(dtype=np.int64)
 
     base, ext = OUTPUT_CSV.rsplit(".", 1)

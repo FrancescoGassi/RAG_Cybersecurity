@@ -20,7 +20,7 @@ class Neighbor:
     index: int
     label: int
     similarity: float
-    vector: np.ndarray          # vettore standardizzato (dopo imputer e scaler)
+    vector: np.ndarray
 
 
 class FaissRAGIndex:
@@ -64,10 +64,6 @@ class FaissRAGIndex:
 
     @staticmethod
     def _normalize_inplace(arr: np.ndarray) -> np.ndarray:
-        """Assicura che l'array sia C-contiguous e lo normalizza L2 in-place.
-        
-        FAISS richiede array C-contiguous per operazioni in-place.
-        """
         arr = np.ascontiguousarray(arr)
         FaissRAGIndex._faiss().normalize_L2(arr)
         return arr
@@ -154,21 +150,18 @@ class FaissRAGIndex:
 
         faiss = self._faiss()
         if RETRIEVAL_MODE == "raw":
-            # BASELINE NUMERICA: vettori standardizzati normalizzati L2
             print("   [BASELINE] Utilizzo vettori numerici standardizzati (k-NN puro con similarità coseno)")
             vectors = np.ascontiguousarray(scaled.astype(np.float32))
             faiss.normalize_L2(vectors)
             self.index = faiss.IndexFlatIP(vectors.shape[1])
             self.index.add(vectors)
         else:
-            # RAG SEMANTICO: embedding da SentenceTransformer
             print("   [RAG] Utilizzo embedding semantico (SentenceTransformer)")
             vectors = self._encode_matrix(scaled, "Embedding training")
             self.index = faiss.IndexFlatIP(vectors.shape[1])
             self.index.add(vectors)
 
     def transform_vector(self, vector: np.ndarray) -> np.ndarray:
-        """Applica imputer e scaler a un singolo vettore (1D)."""
         if self.imputer is None or self.scaler is None:
             raise RuntimeError("Indice non costruito o non caricato.")
         vector = np.asarray(vector, dtype=np.float64).reshape(1, -1)
@@ -179,7 +172,6 @@ class FaissRAGIndex:
         return scaled.reshape(-1)
 
     def search_one(self, vector: np.ndarray, k: int) -> list[Neighbor]:
-        """Cerca i k vicini più prossimi per un singolo vettore (1D)."""
         if self.index is None or self.labels is None or self.training_vectors is None:
             raise RuntimeError("Indice non disponibile.")
         if k <= 0:
@@ -188,12 +180,10 @@ class FaissRAGIndex:
         query_scaled = self.transform_vector(vector)
 
         if RETRIEVAL_MODE == "raw":
-            # Baseline: vettore standardizzato normalizzato
             query_vec = np.ascontiguousarray(query_scaled.astype(np.float32)).reshape(1, -1)
             import faiss
             faiss.normalize_L2(query_vec)
         else:
-            # RAG semantico: embedding
             encoder = self._get_encoder()
             chunks = encoder.row_to_chunks(query_scaled)
             chunk_vectors = self._get_model().encode(chunks, self.embedding_batch_size)
@@ -263,67 +253,15 @@ class FaissRAGIndex:
         scaled = self.scaler.transform(imputed).astype(np.float32)
 
         if RETRIEVAL_MODE == "raw":
-            # Baseline: vettori standardizzati normalizzati
             scaled = np.ascontiguousarray(scaled)
             import faiss
             faiss.normalize_L2(scaled)
             return scaled
         else:
-            # RAG semantico: embedding
             return self._encode_matrix(scaled, "Embedding test")
 
-    @staticmethod
-    def hybrid_vote(
-        neighbors: list[Neighbor],
-        majority_weight: float,
-    ) -> int:
-        if not neighbors:
-            raise RuntimeError("Nessun vicino restituito da FAISS.")
-        if not 0.0 <= majority_weight <= 1.0:
-            raise ValueError("HYBRID_MAJORITY_WEIGHT deve essere tra 0 e 1.")
-
-        count_scores = {
-            label: sum(n.label == label for n in neighbors) / len(neighbors)
-            for label in (0, 1)
-        }
-
-        weights = [max(0.0, float(n.similarity)) for n in neighbors]
-        total_weight = sum(weights)
-        if total_weight == 0.0:
-            similarity_scores = count_scores.copy()
-        else:
-            similarity_scores = {
-                label: sum(
-                    weight for neighbor, weight in zip(neighbors, weights)
-                    if neighbor.label == label
-                ) / total_weight
-                for label in (0, 1)
-            }
-
-        similarity_weight = 1.0 - majority_weight
-        combined = {
-            label: (
-                majority_weight * count_scores[label]
-                + similarity_weight * similarity_scores[label]
-            )
-            for label in (0, 1)
-        }
-
-        if combined[0] == combined[1]:
-            return int(neighbors[0].label)
-        return 0 if combined[0] > combined[1] else 1
-
+    # Voto di maggioranza puro (solo conteggio)
     def majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
-        neighbors = self.search_one(vector, k)
-        if not neighbors:
-            raise RuntimeError("Nessun vicino trovato.")
-        counts = {0: 0, 1: 0}
-        for n in neighbors:
-            counts[n.label] += 1
-        pred = self.hybrid_vote(neighbors, 0.5)
-        return pred, counts, neighbors
-
-    def pure_majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
         neighbors = self.search_one(vector, k)
         if not neighbors:
             raise RuntimeError("Nessun vicino trovato.")
@@ -336,17 +274,21 @@ class FaissRAGIndex:
             pred = 0 if counts[0] > counts[1] else 1
         return pred, counts, neighbors
 
-    def predict_many(
-        self,
-        X: pd.DataFrame,
-        k: int,
-        majority_weight: float,
-    ) -> np.ndarray:
+    def predict_many(self, X: pd.DataFrame, k: int) -> np.ndarray:
         all_neighbors = self.search_many(X, k)
-        return np.asarray(
-            [self.hybrid_vote(neighbors, majority_weight) for neighbors in all_neighbors],
-            dtype=np.int64,
-        )
+        predictions = []
+        for neighbors in all_neighbors:
+            if not neighbors:
+                raise RuntimeError("Nessun vicino trovato per una riga.")
+            counts = {0: 0, 1: 0}
+            for n in neighbors:
+                counts[n.label] += 1
+            if counts[0] == counts[1]:
+                pred = neighbors[0].label
+            else:
+                pred = 0 if counts[0] > counts[1] else 1
+            predictions.append(pred)
+        return np.asarray(predictions, dtype=np.int64)
 
     @staticmethod
     def _paths(prefix: str | Path) -> tuple[Path, Path]:

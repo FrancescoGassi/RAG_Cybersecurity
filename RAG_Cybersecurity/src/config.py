@@ -13,12 +13,11 @@ BALANCE_TRAINING = False
 BALANCE_TEST = False
 
 # Selezione feature e retrieval
-TOP_K_FEATURES: int = 128
+TOP_K_FEATURES: int = None
 K_NEIGHBORS = 3
 
-# Majority voting
-PURE_MAJORITY_VOTING = True                     # True = solo conteggio delle etichette; False = ibrido (con similarità)
-HYBRID_MAJORITY_WEIGHT = 0.50                   # peso per il conteggio (usato solo se PURE_MAJORITY_VOTING è False)
+# Majority voting - solo voto di maggioranza puro (conteggio)
+# (nessuna opzione ibrida)
 
 # Embedding
 EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"

@@ -120,19 +120,11 @@ class Dataset:
             raise ValueError("Il campione selezionato non contiene entrambe le classi.")
         return sampled
 
-    def select_best_features(
-        self,
-        top_k: int | None,
-        random_seed: int,
-    ) -> tuple["Dataset", list[str], dict[str, float]]:
-        if top_k is None or top_k >= len(self.X.columns):
-            feature_names = self.X.columns.tolist()
-            score_map = {name: 1.0 for name in feature_names}
-            return Dataset(self.X.copy(), self.y.copy()), feature_names, score_map
-
-        if top_k <= 0:
-            raise ValueError("TOP_K_FEATURES deve essere maggiore di zero.")
-
+    def compute_mutual_info(self, random_seed: int) -> dict[str, float]:
+        """
+        Calcola il punteggio di mutual information per ogni feature del dataset.
+        Gestisce valori mancanti e infiniti.
+        """
         medians = self.X.median(numeric_only=True).fillna(0.0)
         X_ready = self.X.fillna(medians).fillna(0.0)
 
@@ -141,12 +133,32 @@ class Dataset:
             self.y.to_numpy(dtype=np.int64),
             random_state=random_seed,
         )
-        ranking = sorted(
-            zip(self.X.columns, scores),
-            key=lambda item: (-float(item[1]), item[0]),
-        )
-        selected = [name for name, _ in ranking[: min(top_k, len(ranking))]]
-        score_map = {name: float(score) for name, score in ranking}
+        return {col: float(score) for col, score in zip(self.X.columns, scores)}
+
+    def select_best_features(
+        self,
+        top_k: int | None,
+        random_seed: int,
+        precomputed_scores: dict[str, float] | None = None,
+    ) -> tuple["Dataset", list[str], dict[str, float]]:
+        """
+        Seleziona le top_k feature in base alla mutual information.
+        Se viene fornito precomputed_scores, lo usa senza ricalcolare.
+        """
+        if precomputed_scores is None:
+            score_map = self.compute_mutual_info(random_seed)
+        else:
+            score_map = precomputed_scores
+
+        if top_k is None or top_k >= len(self.X.columns):
+            feature_names = self.X.columns.tolist()
+            return Dataset(self.X.copy(), self.y.copy()), feature_names, score_map
+
+        if top_k <= 0:
+            raise ValueError("TOP_K_FEATURES deve essere maggiore di zero.")
+
+        ranking = sorted(score_map.items(), key=lambda item: (-item[1], item[0]))
+        selected = [name for name, _ in ranking[:min(top_k, len(ranking))]]
         return Dataset(self.X[selected].copy(), self.y.copy()), selected, score_map
 
     def select_features(self, feature_names: list[str]) -> "Dataset":
