@@ -1,0 +1,53 @@
+================================================================================
+                    RAG con PURE MAJORITY VOTING (solo conteggio)                     
+================================================================================
+Modello embedding: sentence-transformers/all-distilroberta-v1
+Vicini FAISS (k):  9
+Selezione feature: USATE TUTTE
+Modalità retrieval: SEMANTIC
+================================================================================
+
+1. Caricamento dataset...
+   Training: 134435, classi={0: 77142, 1: 57293}
+   Test:     27035, classi={0: 13494, 1: 13541}
+
+2. Selezione feature con Mutual Information (cache abilitata)...
+   Caricamento punteggi MI da cache...
+    1. datadir_3: 0.536440
+    2. header_0: 0.534936
+    3. datadir_4: 0.498264
+    4. section_98: 0.452624
+    5. section_148: 0.445468
+    6. section_146: 0.424203
+    7. section_96: 0.405753
+    8. header_59: 0.371893
+    9. general_file_4: 0.371220
+   10. datadir_2: 0.344603
+   Usate tutte le 2381 feature (nessuna selezione).
+
+3. Cache caricata: cache/sentence-transformers_all-distilroberta-v1/training_index_metadata.pkl
+
+4. Retrieval e Majority Voting (puro)...
+Embedding test: 100%|██████████████████████| 212/212 [25:16<00:00,  7.15s/batch]
+
+======================================================================
+Accuracy:  0.8082
+Precision: 0.8377
+Recall:    0.8084
+F1 macro:  0.8040
+
+Matrice di confusione:
+[[12902   592]
+ [ 4594  8947]]
+
+Classification report:
+              precision    recall  f1-score   support
+
+    goodware       0.74      0.96      0.83     13494
+     malware       0.94      0.66      0.78     13541
+
+    accuracy                           0.81     27035
+   macro avg       0.84      0.81      0.80     27035
+weighted avg       0.84      0.81      0.80     27035
+
+CSV salvato in: majority_voting_embedding_predictions_semantic.csv
