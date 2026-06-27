@@ -1,0 +1,66 @@
+================================================================================
+                    RAG con PURE MAJORITY VOTING (solo conteggio)                     
+================================================================================
+Modello embedding: sentence-transformers/all-mpnet-base-v2
+Vicini FAISS (k):  3
+Selezione feature: USATE TUTTE
+Modalità retrieval: SEMANTIC
+================================================================================
+
+1. Caricamento dataset...
+   Training: 134435, classi={0: 77142, 1: 57293}
+   Test:     27035, classi={0: 13494, 1: 13541}
+
+2. Selezione feature con Mutual Information (cache abilitata)...
+   Caricamento punteggi MI da cache...
+    1. datadir_3: 0.536440
+    2. header_0: 0.534936
+    3. datadir_4: 0.498264
+    4. section_98: 0.452624
+    5. section_148: 0.445468
+    6. section_146: 0.424203
+    7. section_96: 0.405753
+    8. header_59: 0.371893
+    9. general_file_4: 0.371220
+   10. datadir_2: 0.344603
+   Usate tutte le 2381 feature (nessuna selezione).
+
+3. Creazione embedding e indice FAISS...
+   [RAG] Utilizzo embedding semantico (SentenceTransformer)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|█| 199/199 [00:00<00:00, 1413.79it/s, Materializing param=
+MPNetModel LOAD REPORT from: sentence-transformers/all-mpnet-base-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Embedding training: 100%|████████████████| 526/526 [1:12:26<00:00,  8.26s/batch]
+   Creato PKL: cache/sentence-transformers_all-mpnet-base-v2/training_index_metadata.pkl
+   Creato FAISS: cache/sentence-transformers_all-mpnet-base-v2/training_index.faiss
+
+4. Retrieval e Majority Voting (puro)...
+Embedding test: 100%|██████████████████████| 106/106 [14:37<00:00,  8.28s/batch]
+
+======================================================================
+Accuracy:  0.7628
+Precision: 0.8009
+Recall:    0.7631
+F1 macro:  0.7551
+
+Matrice di confusione:
+[[12696   798]
+ [ 5616  7925]]
+
+Classification report:
+              precision    recall  f1-score   support
+
+    goodware       0.69      0.94      0.80     13494
+     malware       0.91      0.59      0.71     13541
+
+    accuracy                           0.76     27035
+   macro avg       0.80      0.76      0.76     27035
+weighted avg       0.80      0.76      0.76     27035
+
+CSV salvato in: majority_voting_embedding_predictions_semantic.csv

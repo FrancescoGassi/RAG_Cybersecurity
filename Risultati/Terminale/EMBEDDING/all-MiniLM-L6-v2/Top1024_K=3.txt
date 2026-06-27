@@ -1,0 +1,68 @@
+================================================================================
+                    RAG con PURE MAJORITY VOTING (solo conteggio)                     
+================================================================================
+Modello embedding: sentence-transformers/all-MiniLM-L6-v2
+Vicini FAISS (k):  3
+Selezione feature: TOP 1024 (via MI)
+Modalità retrieval: SEMANTIC
+================================================================================
+
+1. Caricamento dataset...
+   Training: 134435, classi={0: 77142, 1: 57293}
+   Test:     27035, classi={0: 13494, 1: 13541}
+
+2. Selezione feature con Mutual Information (cache abilitata)...
+   Caricamento punteggi MI da cache...
+    1. datadir_3: 0.536440
+    2. header_0: 0.534936
+    3. datadir_4: 0.498264
+    4. section_98: 0.452624
+    5. section_148: 0.445468
+    6. section_146: 0.424203
+    7. section_96: 0.405753
+    8. header_59: 0.371893
+    9. general_file_4: 0.371220
+   10. datadir_2: 0.344603
+   Selezionate 1024 feature su 2381 totali.
+
+3. Cache non compatibile: ricostruzione.
+
+3. Creazione embedding e indice FAISS...
+   [RAG] Utilizzo embedding semantico (SentenceTransformer)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights: 100%|█| 103/103 [00:00<00:00, 1213.41it/s, Materializing param=
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Embedding training: 100%|████████████████| 1051/1051 [45:55<00:00,  2.62s/batch]
+   Creato PKL: cache/sentence-transformers_all-MiniLM-L6-v2/training_index_metadata.pkl
+   Creato FAISS: cache/sentence-transformers_all-MiniLM-L6-v2/training_index.faiss
+
+4. Retrieval e Majority Voting (puro)...
+Embedding test: 100%|██████████████████████| 212/212 [09:13<00:00,  2.61s/batch]
+
+======================================================================
+Accuracy:  0.7925
+Precision: 0.8295
+Recall:    0.7928
+F1 macro:  0.7866
+
+Matrice di confusione:
+[[12956   538]
+ [ 5072  8469]]
+
+Classification report:
+              precision    recall  f1-score   support
+
+    goodware       0.72      0.96      0.82     13494
+     malware       0.94      0.63      0.75     13541
+
+    accuracy                           0.79     27035
+   macro avg       0.83      0.79      0.79     27035
+weighted avg       0.83      0.79      0.79     27035
+
+CSV salvato in: majority_voting_embedding_predictions_semantic.csv
