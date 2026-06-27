@@ -71,8 +71,13 @@ class Dataset:
         y = normalise_labels(frame[target])
         X = frame.drop(columns=[target]).copy()
         X.columns = X.columns.astype(str)
-        X = X.apply(pd.to_numeric, errors="coerce")
-        X = X.replace([np.inf, -np.inf], np.nan)
+        # Converti a numerico, ma non sostituire NaN con medie – se ci sono NaN, fallisce
+        X = X.apply(pd.to_numeric, errors="raise")
+        # Controllo esplicito di NaN e Inf
+        if X.isna().any().any():
+            raise ValueError("Il dataset contiene valori mancanti (NaN). Assicurarsi che i dati siano già preprocessati.")
+        if (X == np.inf).any().any() or (X == -np.inf).any().any():
+            raise ValueError("Il dataset contiene valori infiniti.")
 
         if X.columns.duplicated().any():
             raise ValueError("Il dataset contiene nomi di feature duplicati.")
@@ -123,13 +128,16 @@ class Dataset:
     def compute_mutual_info(self, random_seed: int) -> dict[str, float]:
         """
         Calcola il punteggio di mutual information per ogni feature del dataset.
-        Gestisce valori mancanti e infiniti.
+        I dati devono essere già preprocessati (nessun NaN o infinito).
         """
-        medians = self.X.median(numeric_only=True).fillna(0.0)
-        X_ready = self.X.fillna(medians).fillna(0.0)
+        # Controllo robusto
+        if self.X.isna().any().any():
+            raise ValueError("Il dataset contiene valori mancanti (NaN). Imputazione non consentita.")
+        if (self.X == np.inf).any().any() or (self.X == -np.inf).any().any():
+            raise ValueError("Il dataset contiene valori infiniti.")
 
         scores = mutual_info_classif(
-            X_ready.to_numpy(dtype=np.float32),
+            self.X.to_numpy(dtype=np.float64),
             self.y.to_numpy(dtype=np.int64),
             random_state=random_seed,
         )
@@ -141,10 +149,6 @@ class Dataset:
         random_seed: int,
         precomputed_scores: dict[str, float] | None = None,
     ) -> tuple["Dataset", list[str], dict[str, float]]:
-        """
-        Seleziona le top_k feature in base alla mutual information.
-        Se viene fornito precomputed_scores, lo usa senza ricalcolare.
-        """
         if precomputed_scores is None:
             score_map = self.compute_mutual_info(random_seed)
         else:

@@ -6,8 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from src.embedding import EmbeddingModel
@@ -43,11 +41,8 @@ class FaissRAGIndex:
         self.show_progress = bool(show_progress)
 
         self.index = None
-        self.imputer: SimpleImputer | None = None
-        self.scaler: StandardScaler | None = None
         self.feature_names: list[str] = []
         self.labels: np.ndarray | None = None
-        self.empty_feature_names: list[str] = []
         self.cache_signature: str | None = None
         self.training_vectors: np.ndarray | None = None
 
@@ -132,44 +127,36 @@ class FaissRAGIndex:
         self.cache_signature = cache_signature
         self._encoder = None
 
-        prepared = X.copy()
-        self.empty_feature_names = [
-            name for name in self.feature_names if prepared[name].isna().all()
-        ]
-        if self.empty_feature_names:
-            prepared.loc[:, self.empty_feature_names] = 0.0
-
-        self.imputer = SimpleImputer(strategy="median")
-        self.scaler = StandardScaler()
-        imputed = self.imputer.fit_transform(prepared)
-        scaled = self.scaler.fit_transform(imputed).astype(np.float32)
-        if not np.isfinite(scaled).all():
-            raise RuntimeError("Il training standardizzato non è valido.")
-
-        self.training_vectors = scaled.copy()
+        # Converti a numpy e controlla presenza di NaN
+        raw = X.to_numpy(dtype=np.float64, na_value=np.nan)
+        if np.any(np.isnan(raw)):
+            raise ValueError("Il training contiene valori mancanti (NaN). Assicurarsi che i dati siano già preprocessati.")
+        if not np.isfinite(raw).all():
+            raise ValueError("Il training contiene valori infiniti.")
+        self.training_vectors = raw.astype(np.float32)
 
         faiss = self._faiss()
-        if RETRIEVAL_MODE == "raw":
-            print("   [BASELINE] Utilizzo vettori numerici standardizzati (k-NN puro con similarità coseno)")
-            vectors = np.ascontiguousarray(scaled.astype(np.float32))
+        if RETRIEVAL_MODE == "original":
+            print("   [ORIGINAL] Utilizzo vettori numerici originali (k-NN puro con similarità coseno)")
+            vectors = np.ascontiguousarray(raw.astype(np.float32))
             faiss.normalize_L2(vectors)
             self.index = faiss.IndexFlatIP(vectors.shape[1])
             self.index.add(vectors)
         else:
-            print("   [RAG] Utilizzo embedding semantico (SentenceTransformer)")
-            vectors = self._encode_matrix(scaled, "Embedding training")
+            print("   [EMBEDDING] Utilizzo embedding (SentenceTransformer)")
+            vectors = self._encode_matrix(raw, "Embedding training")
             self.index = faiss.IndexFlatIP(vectors.shape[1])
             self.index.add(vectors)
 
-    def transform_vector(self, vector: np.ndarray) -> np.ndarray:
-        if self.imputer is None or self.scaler is None:
-            raise RuntimeError("Indice non costruito o non caricato.")
+    def _validate_vector(self, vector: np.ndarray) -> np.ndarray:
         vector = np.asarray(vector, dtype=np.float64).reshape(1, -1)
         if vector.shape[1] != len(self.feature_names):
             raise ValueError("Numero di feature diverso da quello del training.")
-        imputed = self.imputer.transform(vector)
-        scaled = self.scaler.transform(imputed).astype(np.float32)
-        return scaled.reshape(-1)
+        if np.any(np.isnan(vector)):
+            raise ValueError("Il vettore contiene valori mancanti (NaN).")
+        if not np.isfinite(vector).all():
+            raise ValueError("Il vettore contiene valori infiniti.")
+        return vector.reshape(-1)
 
     def search_one(self, vector: np.ndarray, k: int) -> list[Neighbor]:
         if self.index is None or self.labels is None or self.training_vectors is None:
@@ -177,15 +164,15 @@ class FaissRAGIndex:
         if k <= 0:
             raise ValueError("k deve essere maggiore di zero.")
 
-        query_scaled = self.transform_vector(vector)
+        query_raw = self._validate_vector(vector)
 
-        if RETRIEVAL_MODE == "raw":
-            query_vec = np.ascontiguousarray(query_scaled.astype(np.float32)).reshape(1, -1)
+        if RETRIEVAL_MODE == "original":
+            query_vec = np.ascontiguousarray(query_raw.astype(np.float32)).reshape(1, -1)
             import faiss
             faiss.normalize_L2(query_vec)
         else:
             encoder = self._get_encoder()
-            chunks = encoder.row_to_chunks(query_scaled)
+            chunks = encoder.row_to_chunks(query_raw)
             chunk_vectors = self._get_model().encode(chunks, self.embedding_batch_size)
             query_embedding = chunk_vectors.mean(axis=0)
             norm = float(np.linalg.norm(query_embedding))
@@ -238,27 +225,26 @@ class FaissRAGIndex:
         return result
 
     def _prepare_queries(self, X: pd.DataFrame) -> np.ndarray:
-        if self.index is None or self.imputer is None or self.scaler is None:
-            raise RuntimeError("Indice non costruito o non caricato.")
+        if self.index is None:
+            raise RuntimeError("Indice non costruito.")
         missing = [name for name in self.feature_names if name not in X.columns]
         if missing:
             raise ValueError(f"Feature mancanti nel test: {missing[:10]}")
 
-        ordered = X[self.feature_names].copy()
-        if self.empty_feature_names:
-            ordered.loc[:, self.empty_feature_names] = ordered.loc[
-                :, self.empty_feature_names
-            ].fillna(0.0)
-        imputed = self.imputer.transform(ordered)
-        scaled = self.scaler.transform(imputed).astype(np.float32)
+        ordered = X[self.feature_names].to_numpy(dtype=np.float64)
+        if np.any(np.isnan(ordered)):
+            raise ValueError("Il test contiene valori mancanti (NaN).")
+        if not np.isfinite(ordered).all():
+            raise ValueError("Il test contiene valori infiniti.")
+        ordered = ordered.astype(np.float32)
 
-        if RETRIEVAL_MODE == "raw":
-            scaled = np.ascontiguousarray(scaled)
+        if RETRIEVAL_MODE == "original":
+            ordered = np.ascontiguousarray(ordered)
             import faiss
-            faiss.normalize_L2(scaled)
-            return scaled
+            faiss.normalize_L2(ordered)
+            return ordered
         else:
-            return self._encode_matrix(scaled, "Embedding test")
+            return self._encode_matrix(ordered, "Embedding test")
 
     # Voto di maggioranza puro (solo conteggio)
     def majority_vote(self, vector: np.ndarray, k: int) -> tuple[int, dict[int, int], list[Neighbor]]:
@@ -301,7 +287,7 @@ class FaissRAGIndex:
         return faiss_path.is_file() and pkl_path.is_file()
 
     def save(self, prefix: str | Path) -> None:
-        if self.index is None or self.imputer is None or self.scaler is None:
+        if self.index is None:
             raise RuntimeError("Nessun indice da salvare.")
         faiss_path, pkl_path = self._paths(prefix)
         faiss_path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,9 +297,6 @@ class FaissRAGIndex:
             "model_name": self.model_name,
             "feature_names": self.feature_names,
             "labels": self.labels,
-            "empty_feature_names": self.empty_feature_names,
-            "imputer": self.imputer,
-            "scaler": self.scaler,
             "cache_signature": self.cache_signature,
             "top_features_per_sample": self.top_features_per_sample,
             "features_per_chunk": self.features_per_chunk,
@@ -332,9 +315,6 @@ class FaissRAGIndex:
         self.model_name = str(metadata["model_name"])
         self.feature_names = list(metadata["feature_names"])
         self.labels = np.asarray(metadata["labels"], dtype=np.int64)
-        self.empty_feature_names = list(metadata.get("empty_feature_names", []))
-        self.imputer = metadata["imputer"]
-        self.scaler = metadata["scaler"]
         self.cache_signature = metadata.get("cache_signature")
         self.top_features_per_sample = int(metadata["top_features_per_sample"])
         self.features_per_chunk = int(metadata["features_per_chunk"])

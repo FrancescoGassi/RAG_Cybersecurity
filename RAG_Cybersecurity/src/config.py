@@ -29,9 +29,9 @@ EMBEDDING_DEVICE: str | None = None             # None, "cpu" o "cuda"
 SHOW_PROGRESS = True
 
 # --- MODALITÀ DI RETRIEVAL ---
-# "semantic"  -> usa il sistema RAG con SentenceTransformer
-# "raw"       -> usa i vettori numerici standardizzati direttamente (baseline k-NN)
-RETRIEVAL_MODE = "raw"
+# "embedding" -> usa il sistema RAG con SentenceTransformer
+# "original"  -> usa i vettori numerici standardizzati direttamente (baseline k-NN)
+RETRIEVAL_MODE = "original"
 
 # Cache e output
 CACHE_DIR = "cache"
